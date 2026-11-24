@@ -88,3 +88,27 @@
 - Versión publicada: artifact https://claude.ai/artifact/NvvoZbkaQU5TtDW2dAnhis (versión 6).
 - Balance no verificado: un 3 contra 3 en entradas puede seguir siendo frágil si los guardias se quedan con hambre.
 
+
+## Entrada 3 · 2026-11-24
+
+### Mi ejército (usuario)
+- Pidió que el escudo no sea universal: solo las unidades con escudo (espada y hacha) bloquean.
+- Pidió que el escudo bloquee la mitad del daño, y solo si se ve al frente.
+- Pidió publicar el juego con "Publica" y que se actualice el artifact original, sin crear otros.
+
+### Ejército rival (Claude)
+- Escudo: solo espada y hacha bloquean; bloquean 50% si el escudo está al frente y el ataque viene de frente. Sin escudo, daño completo.
+- Eliminado el bloqueo con arma ("PARADA") para unidades sin escudo.
+- IA: solo bloquea si la unidad tiene escudo (antes bloqueaba siempre).
+- Input del jugador: bloqueo solo con escudo.
+- Artifact original actualizado: https://claude.ai/artifact/NvvoZbkaQU5TtDW2dAnhis (versión 7). Borrados los otros dos "Tu vs Mi".
+- Skill `publica` (.claude/skills/publica/SKILL.md): actualiza siempre el artifact original.
+- Stats de HP y daño NO modificados.
+
+### Decisiones tomadas por mí (interpretaciones)
+- "Ver el escudo" = unidad con escudo, bloqueando, y ataque dentro de ±1.6 rad de su frente (mismo criterio que ya existía).
+- Los arqueros y lanzas no bloquean (no tienen escudo).
+
+### Pendiente / conocido
+- No verificado en navegador; solo revisión de sintaxis (node --check).
+- Cambios del juego ya commiteados y subidos (commits 5e28f41, bccb681, c6e405d).
