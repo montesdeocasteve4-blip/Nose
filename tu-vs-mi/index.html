@@ -99,6 +99,52 @@
   const FIRE = { type: 'fire', x: 260, y: WORLD_H / 2, r: 14 };
   // Estante de armas físico, cerca de la fogata
   const RACK_POS = { type: 'rack', x: 200, y: 1330, r: 30 };
+
+  // Fortaleza de troncos alrededor de tu escuadra (2 × y 3 veces el diámetro del claro)
+  const FORT = { x: 20, y: WORLD_H / 2 - 780, w: 1040, h: 1560 };
+  const FX0 = FORT.x, FX1 = FORT.x + FORT.w, FY0 = FORT.y, FY1 = FORT.y + FORT.h;
+  const FORT_T = 56, GATE_W = 130, FMX = FORT.x + FORT.w / 2, FMY = WORLD_H / 2;
+  // Entradas: arriba, abajo y al frente (hacia el enemigo)
+  const GATES = [
+    { x: FMX, y: FY0 + FORT_T / 2 },
+    { x: FMX, y: FY1 - FORT_T / 2 },
+    { x: FX1 - FORT_T / 2, y: FMY }
+  ];
+  const wall = (x, y, w, h) => ({ type: 'wall', x, y, w, h, sy: y + h });
+  const WALLS = [
+    wall(FX0, FY0, FMX - GATE_W / 2 - FX0, FORT_T),
+    wall(FMX + GATE_W / 2, FY0, FX1 - FMX - GATE_W / 2, FORT_T),
+    wall(FX0, FY1 - FORT_T, FMX - GATE_W / 2 - FX0, FORT_T),
+    wall(FMX + GATE_W / 2, FY1 - FORT_T, FX1 - FMX - GATE_W / 2, FORT_T),
+    wall(FX1 - FORT_T, FY0, FORT_T, FMY - GATE_W / 2 - FY0),
+    wall(FX1 - FORT_T, FMY + GATE_W / 2, FORT_T, FY1 - (FMY + GATE_W / 2)),
+    wall(FX0, FY0, FORT_T, FORT.h)
+  ];
+  const insideFort = (x, y, grow = 0) => x > FX0 - grow && x < FX1 + grow && y > FY0 - grow && y < FY1 + grow;
+  // Punto al que se mueve una unidad: si su objetivo está del otro lado del muro, va a la entrada más cercana
+  function navPoint(u, t) {
+    if (insideFort(u.x, u.y) === insideFort(t.x, t.y)) return t;
+    let best = GATES[0], bd = Infinity;
+    for (const g of GATES) {
+      const d = Math.hypot(g.x - u.x, g.y - u.y);
+      if (d < bd) { bd = d; best = g; }
+    }
+    return best;
+  }
+  // Empuja a una unidad fuera de un muro (radio 12)
+  function pushOutOfWall(u, w) {
+    const cx = clamp(u.x, w.x, w.x + w.w), cy = clamp(u.y, w.y, w.y + w.h);
+    const dx = u.x - cx, dy = u.y - cy, d = Math.hypot(dx, dy), R = 12;
+    if (d >= R) return;
+    if (d > 0.001) { const k = (R - d) / d; u.x += dx * k; u.y += dy * k; return; }
+    const sides = [
+      [u.x - w.x, () => { u.x = w.x - R; }],
+      [w.x + w.w - u.x, () => { u.x = w.x + w.w + R; }],
+      [u.y - w.y, () => { u.y = w.y - R; }],
+      [w.y + w.h - u.y, () => { u.y = w.y + w.h + R; }]
+    ];
+    sides.sort((a, b) => a[0] - b[0])[0][1]();
+  }
   const HEAL_R = 260, HEAL_RATE = 10;
   const CLEARINGS = [
     { x: 260, y: WORLD_H / 2, r: 260 },
@@ -122,6 +168,7 @@
   const trees = [], bushes = [], decor = [];
   const isFree = (x, y, r, gap) => {
     if (inClearing(x, y, r + 20)) return false;
+    if (insideFort(x, y, r + 30)) return false;
     for (const d of decor) if (Math.hypot(x - d.x, y - d.y) < d.r + r + gap) return false;
     return true;
   };
@@ -318,7 +365,10 @@
           const d = Math.hypot(p.x - u.x, p.y - u.y);
           if (d < nd) { nd = d; near = p; }
         }
-        if (near && nd > 1) { u.vx = (near.x - u.x) / nd * 70; u.vy = (near.y - u.y) / nd * 70; }
+        if (near && nd > 1) {
+          const p = navPoint(u, near), pdx = p.x - u.x, pdy = p.y - u.y, pd = Math.hypot(pdx, pdy) || 1;
+          u.vx = pdx / pd * 70; u.vy = pdy / pd * 70;
+        }
       }
       return;
     }
@@ -334,7 +384,8 @@
       return;
     }
     if (d > w.reach * 0.85) {
-      u.vx = dx / d * w.speed * 0.8; u.vy = dy / d * w.speed * 0.8;
+      const p = navPoint(u, t), pdx = p.x - u.x, pdy = p.y - u.y, pd = Math.hypot(pdx, pdy) || 1;
+      u.vx = pdx / pd * w.speed * 0.8; u.vy = pdy / pd * w.speed * 0.8;
     } else if (u.cd <= 0 && u.swing <= 0) {
       startSwing(u);
     }
@@ -389,6 +440,7 @@
       if (u.blocking) k = Math.min(k, 0.4);
       u.x = clamp(u.x + u.vx * k * dt, 30, WORLD_W - 30);
       u.y = clamp(u.y + u.vy * k * dt, 30, WORLD_H - 30);
+      for (const w of WALLS) pushOutOfWall(u, w);
       if (u.vx || u.vy) u.walkT += dt * 9;
     }
 
@@ -461,7 +513,8 @@
         if (Math.hypot(e.x - a.x, e.y - a.y) <= 14) { applyArrowHit(a, e); hit = true; break; }
       }
       const far = Math.hypot(a.x - a.sx, a.y - a.sy) > a.range;
-      if (hit || far || a.x < 0 || a.y < 0 || a.x > WORLD_W || a.y > WORLD_H) arrows.splice(i, 1);
+      const inWall = WALLS.some(w => a.x >= w.x && a.x <= w.x + w.w && a.y >= w.y && a.y <= w.y + w.h);
+      if (hit || far || inWall || a.x < 0 || a.y < 0 || a.x > WORLD_W || a.y > WORLD_H) arrows.splice(i, 1);
     }
   }
 
@@ -494,6 +547,49 @@
       if (ended) {
         over.innerHTML = (ended === 'win' ? '¡Victoria!' : 'Derrota') + '<small>Clic para jugar otra vez</small>';
         over.style.display = 'flex';
+      }
+    }
+  }
+
+  // ---------- Dibujo de la muralla de troncos ----------
+  function drawLog(x, y, w, h, shade) {
+    ctx.fillStyle = shade ? '#8a6238' : '#6b4a2b';
+    ctx.fillRect(x, y, w, h);
+    ctx.fillStyle = 'rgba(255,220,160,0.18)';
+    ctx.fillRect(x, y + 1, w, h * 0.25);
+    ctx.strokeStyle = '#3f2a16'; ctx.lineWidth = 1;
+    ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
+  }
+  function logEnd(cx, cy, r) {
+    ctx.fillStyle = '#c49a64';
+    ctx.beginPath(); ctx.arc(cx, cy, r, 0, TAU); ctx.fill();
+    ctx.strokeStyle = '#3f2a16'; ctx.lineWidth = 1; ctx.stroke();
+    ctx.strokeStyle = 'rgba(90,60,30,0.6)';
+    ctx.beginPath(); ctx.arc(cx, cy, r * 0.5, 0, TAU); ctx.stroke();
+  }
+  function drawWall(w) {
+    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+    ctx.fillRect(w.x + 5, w.y + 8, w.w, w.h);
+    const L = 26;
+    if (w.w >= w.h) {
+      // Muro horizontal: dos hileras de troncos apilados
+      const rh = w.h / 2;
+      for (let r = 0; r < 2; r++) {
+        for (let x = w.x, i = 0; x < w.x + w.w; x += L, i++) {
+          drawLog(x, w.y + r * rh, Math.min(L, w.x + w.w - x), rh, (i + r) % 2 === 0);
+        }
+        logEnd(w.x, w.y + r * rh + rh / 2, rh / 2 - 1);
+        logEnd(w.x + w.w, w.y + r * rh + rh / 2, rh / 2 - 1);
+      }
+    } else {
+      // Muro vertical
+      const cw = w.w / 2;
+      for (let c = 0; c < 2; c++) {
+        for (let y = w.y, i = 0; y < w.y + w.h; y += L, i++) {
+          drawLog(w.x + c * cw, y, cw, Math.min(L, w.y + w.h - y), (i + c) % 2 === 0);
+        }
+        logEnd(w.x + c * cw + cw / 2, w.y, cw / 2 - 1);
+        logEnd(w.x + c * cw + cw / 2, w.y + w.h, cw / 2 - 1);
       }
     }
   }
@@ -721,6 +817,9 @@
     touchMode = false; mouse.x = e.clientX; mouse.y = e.clientY;
   });
   canvas.addEventListener('pointerdown', e => {
+    // Tocar el estante físico (estando cerca) abre el menú de armas
+    const wx = cam.x + (e.clientX - W / 2) / zoom, wy = cam.y + (e.clientY - H / 2) / zoom;
+    if (!rackOpen && Math.hypot(wx - RACK_POS.x, wy - RACK_POS.y) < 40) { toggleRack(); return; }
     if (e.pointerType === 'touch') return; // en teléfono se ataca con el botón Atacar
     touchMode = false;
     mouse.x = e.clientX; mouse.y = e.clientY;
@@ -876,12 +975,14 @@
     const items = [];
     for (const d of decor) if (d.x >= left && d.x <= right && d.y >= top && d.y <= bottom) items.push(d);
     for (const u of units) if (u.x >= left && u.x <= right && u.y >= top && u.y <= bottom) items.push(u);
-    items.sort((a, b) => a.y - b.y);
+    for (const w of WALLS) items.push(w);
+    items.sort((a, b) => (a.sy ?? a.y) - (b.sy ?? b.y));
     for (const it of items) {
       if (it.type === 'tree') drawTree(it);
       else if (it.type === 'bush') drawBush(it);
       else if (it.type === 'fire') drawFire(it, t);
       else if (it.type === 'rack') drawRack(it);
+      else if (it.type === 'wall') drawWall(it);
       else drawUnit(it, t);
     }
 
@@ -920,6 +1021,8 @@
   (function buildMiniBg() {
     const g = miniBg.getContext('2d');
     g.fillStyle = '#43702c'; g.fillRect(0, 0, MW, MH);
+    g.fillStyle = '#6b4a2b';
+    for (const w of WALLS) g.fillRect(w.x * msx, w.y * msy, Math.max(1, w.w * msx), Math.max(1, w.h * msy));
     for (const c of CLEARINGS) {
       g.fillStyle = '#8a7a4c';
       g.beginPath(); g.arc(c.x * msx, c.y * msy, c.r * msx, 0, TAU); g.fill();

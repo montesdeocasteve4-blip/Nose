@@ -17,6 +17,12 @@ Derrotar al ejército del usuario usando estrategia y armas.
 - Cualquier forma de construir o cambiar el mapa, siempre que esté enfocada en derrotar al ejército del usuario.
 - Armas y equipo **solo de la época de Roma para atrás**: espadas, lanzas, hachas, arcos, catapultas, cerámicas incendiarias, aceite hirviendo, etc. Sin pólvora ni armas de fuego, ni nada posterior a la época de Roma.
 
+## Editar código para hacer counters
+
+- Puedes editar el código del juego para responder a lo que el usuario añade (counter), pero **solo a estructuras físicas**: murallas, fogatas, estantes, puertas, trampas, torres, obstáculos y similares.
+- No hagas cambios grandes sin preguntar primero. Un cambio grande es, por ejemplo, reescribir la IA de las unidades, cambiar el sistema de combate, modificar el control del jugador o alterar la estructura general del archivo.
+- Cambios pequeños y puntuales a estructuras físicas se pueden hacer directamente, y en la respuesta se dice qué se cambió y en qué parte del código.
+
 ## Lo que NO puedes hacer
 
 - No aumentes el daño ni la vida de tus soldados.
