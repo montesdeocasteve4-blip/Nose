@@ -524,8 +524,10 @@
       startSwing(u);
     }
     // Decide bloquear cuando el objetivo está atacando
-    if (u.shield && t.swing > 0 && d < WEAPONS[t.weapon].reach + 30 && u.blockT <= 0 && rand() < 0.5) {
+    // Bloqueo con enfriamiento: como el tuyo, máximo un bloqueo cada 2.5 s (antes bloqueaban casi siempre)
+    if (u.shield && t.swing > 0 && d < WEAPONS[t.weapon].reach + 30 && u.blockT <= 0 && (u.aiBlockCd || 0) <= 0 && rand() < 0.35) {
       u.blockT = 0.5;
+      u.aiBlockCd = 2.5;
     }
   }
 
@@ -1562,6 +1564,7 @@
       u.cd = Math.max(0, u.cd - dt);
       u.fireT = Math.max(0, (u.fireT || 0) - dt);
       u.forgeT = Math.max(0, (u.forgeT || 0) - dt);
+      u.aiBlockCd = Math.max(0, (u.aiBlockCd || 0) - dt);
       u.flash = Math.max(0, u.flash - dt);
       u.blockT = Math.max(0, u.blockT - dt);
       if (u.team !== 'civ') { hungerUpdate(u, dt); if (u.dead) continue; }
