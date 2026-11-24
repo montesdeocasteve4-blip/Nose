@@ -45,10 +45,9 @@
   #ring .b-base { width: 58px; height: 58px; right: 128px; bottom: 15px; font-size: 11px; }
   #ring .b-mount { width: 60px; height: 60px; right: 6px; bottom: 226px; font-size: 11px; }
   #ring button[hidden] { display: none; }
-  #ring .b-fire { width: 56px; height: 56px; right: 98px; bottom: 218px; font-size: 10px; }
   #zoombtn { position: fixed; top: calc(max(10px, env(safe-area-inset-top, 0px)) + 96px); right: max(10px, env(safe-area-inset-right, 0px));
           width: 40px; height: 40px; font-size: 10px; }
-  #rack { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(92vw, 360px); max-height: 80vh; overflow: auto;
+  #rack { position: fixed; left: 10px; bottom: 10px; width: min(70vw, 260px); max-height: 55vh; overflow: auto;
           background: rgba(20,28,14,.95); color: #eef5e0; border: 1px solid rgba(255,255,255,.25); border-radius: 12px;
           padding: 12px; z-index: 5; box-shadow: 0 10px 30px rgba(0,0,0,.5); }
   #rack[hidden] { display: none; }
@@ -77,7 +76,6 @@
     <button data-act="squad" class="b-squad">Esc.: ataque</button>
     <button data-act="base" class="b-base">Base</button>
     <button data-act="mount" class="b-mount" hidden>Montar</button>
-    <button data-act="fire" class="b-fire">Fuego: no</button>
   </div>
   <button data-act="zoom" id="zoombtn">Zoom</button>
 </div>
@@ -104,8 +102,10 @@
   // Fogata: cura a tu escuadra si está dentro del radio HEAL_R
   // Fogata en el centro del claro de la orilla izquierda; cura dentro del mismo círculo
   const FIRE = { type: 'fire', x: 760, y: WORLD_H / 2, r: 14 };
-  // Estante de armas físico, cerca de la fogata
-  const RACK_POS = { type: 'rack', x: 700, y: 1330, r: 30 };
+  // Estante de armas físico, junto a los muñecos de paja
+  const RACK_POS = { type: 'rack', x: 1165, y: 600, r: 30 };
+  // Casa del curandero: dentro, la curación es rápida si el curandero está dentro; si no, muy lenta
+  const HOUSE = { type: 'house', x: 1110, y: 1440, w: 120, h: 84, sy: 1440 };
 
   // Fortaleza de troncos alrededor de tu escuadra (2 × y 3 veces el diámetro del claro)
   const FORT = { x: 420, y: WORLD_H / 2 - 780, w: 1040, h: 1560 };
@@ -129,14 +129,35 @@
   ];
   const insideFort = (x, y, grow = 0) => x > FX0 - grow && x < FX1 + grow && y > FY0 - grow && y < FY1 + grow;
   // Punto al que se mueve una unidad: si su objetivo está del otro lado del muro, va a la entrada más cercana
+  // Siguiente punto del camino hacia t: rodea los muros y pasa por las entradas (grafo de esquinas)
   function navPoint(u, t) {
-    if (insideFort(u.x, u.y) === insideFort(t.x, t.y)) return t;
-    let best = GATES[0], bd = Infinity;
-    for (const g of GATES) {
-      const d = Math.hypot(g.x - u.x, g.y - u.y);
-      if (d < bd) { bd = d; best = g; }
+    if (!navBlocked(u.x, u.y, t.x, t.y)) return t;
+    const n = NAV_NODES.length;
+    const dist = new Array(n).fill(Infinity), prev = new Array(n).fill(-1), done = new Array(n).fill(false);
+    for (let i = 0; i < n; i++) {
+      if (!navBlocked(u.x, u.y, NAV_NODES[i].x, NAV_NODES[i].y)) dist[i] = Math.hypot(NAV_NODES[i].x - u.x, NAV_NODES[i].y - u.y);
     }
-    return best;
+    for (;;) {
+      let c = -1, cd = Infinity;
+      for (let i = 0; i < n; i++) if (!done[i] && dist[i] < cd) { cd = dist[i]; c = i; }
+      if (c < 0) break;
+      done[c] = true;
+      for (let j = 0; j < n; j++) {
+        if (!NAV_ADJ[c][j] || done[j]) continue;
+        const nd = cd + Math.hypot(NAV_NODES[j].x - NAV_NODES[c].x, NAV_NODES[j].y - NAV_NODES[c].y);
+        if (nd < dist[j]) { dist[j] = nd; prev[j] = c; }
+      }
+    }
+    let best = -1, bt = Infinity;
+    for (let i = 0; i < n; i++) {
+      if (dist[i] === Infinity || navBlocked(NAV_NODES[i].x, NAV_NODES[i].y, t.x, t.y)) continue;
+      const tot = dist[i] + Math.hypot(t.x - NAV_NODES[i].x, t.y - NAV_NODES[i].y);
+      if (tot < bt) { bt = tot; best = i; }
+    }
+    if (best < 0) return t;
+    let k = best;
+    while (prev[k] !== -1) k = prev[k];
+    return NAV_NODES[k];
   }
   // Empuja a una unidad fuera de un muro (radio 12)
   function pushOutOfWall(u, w) {
@@ -167,6 +188,7 @@
     axe:        { name: 'Hacha',     reach: 40, dmg: 24, cd: 1.1, swing: 0.5,  speed: 102, shield: true,  a0: -1.0 },
     greatsword: { name: 'Espadón',   reach: 52, dmg: 30, cd: 1.4, swing: 0.55, speed: 90,  shield: false, a0: -1.0 },
     // Arco: dispara a distancia; reach/dmg son la espada corta de respaldo
+    knife:      { name: 'Cuchillo', reach: 26, dmg: 8, cd: 0.7, swing: 0.3, speed: 110, shield: false, a0: -1.0 },
     hoe:        { name: 'Azada',    reach: 0, dmg: 0, cd: 99, swing: 0.3, speed: 70, shield: false, a0: -0.8 },
     bow:        { name: 'Arco',      reach: 40, dmg: 12, cd: 1.2, swing: 0.35, speed: 100, shield: false, a0: 0,
                   ranged: { range: 380, speed: 520, dmg: 22 } }
@@ -273,9 +295,9 @@
   }
 
   // ---------- Unidades ----------
-  const SPAWN_PLAYER = ['sword', 'bow', 'spear', 'axe', 'greatsword', 'sword', 'spear'];
-  const SPAWN_ENEMY  = ['sword', 'spear', 'axe', 'sword', 'greatsword'];
-  const ENEMY_POS = [[3270, 1830], [3330, 1885], [3270, 1940], [3330, 1995], [3270, 2050]];
+  const SPAWN_PLAYER = ['sword', 'bow', 'spear', 'axe', 'greatsword', 'sword', 'spear', 'knife'];
+  const SPAWN_ENEMY  = ['sword', 'spear', 'axe', 'sword', 'greatsword', 'bow', 'spear', 'bow'];
+  const ENEMY_POS = [[3270, 1830], [3330, 1885], [3270, 1940], [3330, 1995], [3270, 2050], [3330, 1830], [3270, 2110], [3330, 2110]];
 
   let units = [], player = [], enemy = [], effects = [], arrows = [];
   // Alarma: un soldado que ve enemigos llama a la escuadra y evitan el combate hasta reunirse
@@ -284,6 +306,35 @@
   // Establo (su techo bloquea), trampas de estacas frente a la entrada del frente, y el caballo
   const STABLE = { type: 'stable', x: 500, y: 380, w: 150, h: 60, sy: 440 };
   const SOLIDS = WALLS.concat([STABLE]);
+  // Grafo de navegación: esquinas de los obstáculos con margen (radio de la unidad + holgura)
+  const NAV_M = 14;
+  const NAV_OBS = SOLIDS.map(s => ({ x0: s.x - NAV_M + 1, y0: s.y - NAV_M + 1, x1: s.x + s.w + NAV_M - 1, y1: s.y + s.h + NAV_M - 1 }));
+  const NAV_NODES = [];
+  for (const s of SOLIDS) {
+    for (const [px, py] of [[s.x - NAV_M, s.y - NAV_M], [s.x + s.w + NAV_M, s.y - NAV_M], [s.x - NAV_M, s.y + s.h + NAV_M], [s.x + s.w + NAV_M, s.y + s.h + NAV_M]]) {
+      if (!NAV_OBS.some(r => px > r.x0 && px < r.x1 && py > r.y0 && py < r.y1)) NAV_NODES.push({ x: px, y: py });
+    }
+  }
+  // ¿El segmento a→b cruza algún obstáculo? (Liang-Barsky)
+  function navBlocked(ax, ay, bx, by) {
+    const dx = bx - ax, dy = by - ay;
+    for (const r of NAV_OBS) {
+      if ((ax > r.x0 && ax < r.x1 && ay > r.y0 && ay < r.y1) || (bx > r.x0 && bx < r.x1 && by > r.y0 && by < r.y1)) continue;
+      let t0 = 0, t1 = 1, hit = true;
+      const p = [-dx, dx, -dy, dy], q = [ax - r.x0, r.x1 - ax, ay - r.y0, r.y1 - ay];
+      for (let i = 0; i < 4 && hit; i++) {
+        if (p[i] === 0) { if (q[i] < 0) hit = false; }
+        else {
+          const k = q[i] / p[i];
+          if (p[i] < 0) { if (k > t1) hit = false; else if (k > t0) t0 = k; }
+          else { if (k < t0) hit = false; else if (k < t1) t1 = k; }
+        }
+      }
+      if (hit && t0 < t1) return true;
+    }
+    return false;
+  }
+  const NAV_ADJ = NAV_NODES.map((a, i) => NAV_NODES.map((b, j) => i !== j && !navBlocked(a.x, a.y, b.x, b.y)));
   const PITS = [
     { type: 'pit', x: 2300, y: 1180, r: 34, sy: 1180 },
     { type: 'pit', x: 2335, y: 1280, r: 34, sy: 1280 },
@@ -318,7 +369,7 @@
   function makeUnit(team, weapon, x, y, f, mode) {
     return {
       team, weapon, x, y, f, mode, homeMode: mode,
-      hp: 100, dead: false,
+      hp: 100, dead: false, hunger: 100, starving: false,
       cd: 0, swing: 0, swingTotal: 0, hitDone: false,
       target: null, aiT: 0, blockT: 0, blocking: false,
       walkT: 0, flash: 0, vx: 0, vy: 0, ctrl: false,
@@ -334,7 +385,7 @@
 
   function reset() {
     player = SPAWN_PLAYER.map((w, i) => makeUnit('player', w, 800, 1100 + (i - 3) * 110, 0, 'base'));
-    player.forEach((p, i) => { p.slot = i; });
+    player.forEach((p, i) => { p.slot = i; p.healer = p.weapon === 'knife'; p.post = -1; });
     alert = { active: false, phase: 'idle', caller: null, t: 0 };
     horse = { type: 'horse', x: 575, y: 470, f: 0, moving: false, rider: null };
     enemyWave = false; enemyTimer = 0;
@@ -350,7 +401,6 @@
   }
 
   function startSwing(u) {
-    if (u.team === 'player' && !u.ctrl && !fireFree) return;
     const w = WEAPONS[u.weapon];
     u.swing = w.swing; u.swingTotal = w.swing;
     u.cd = w.cd; u.hitDone = false;
@@ -376,10 +426,12 @@
     const toAttacker = Math.atan2(u.y - e.y, u.x - e.x);
     const facingAttacker = Math.abs(angDiff(toAttacker, e.f)) < 1.6;
     let dmg = w.dmg;
-    if (e.blocking && facingAttacker) {
-      // El escudo bloquea 60% del daño; sin escudo, parar con el arma bloquea 30%
-      dmg = w.dmg * (e.shield ? 0.4 : 0.7);
-      addEffect(e.x, e.y - 50, (e.shield ? 'ESCUDO -' : 'PARADA -') + Math.round(dmg), '#7fd3ff');
+    if (u.starving) dmg *= 0.9; // hambriento: 10% menos daño
+    if (e.mounted) dmg *= 0.7; // a caballo recibes 30% menos daño
+    if (e.blocking && e.shield && facingAttacker) {
+      // Solo el escudo visible al frente bloquea: la mitad del daño
+      dmg *= 0.5;
+      addEffect(e.x, e.y - 50, 'ESCUDO -' + Math.round(dmg), '#7fd3ff');
     } else {
       addEffect(e.x, e.y - 50, '-' + Math.round(dmg), '#ff6b6b');
     }
@@ -447,7 +499,7 @@
       startSwing(u);
     }
     // Decide bloquear cuando el objetivo está atacando
-    if (t.swing > 0 && d < WEAPONS[t.weapon].reach + 30 && u.blockT <= 0 && rand() < 0.5) {
+    if (u.shield && t.swing > 0 && d < WEAPONS[t.weapon].reach + 30 && u.blockT <= 0 && rand() < 0.5) {
       u.blockT = 0.5;
     }
   }
@@ -466,7 +518,7 @@
   // Puesto de guardia: en modo Base, tres vigilan las entradas; el resto rodea la fogata
   function homePos(u) {
     const s = u.slot || 0;
-    if (u.homeMode === 'base' && s >= 1 && s <= GATE_GUARD.length) return GATE_GUARD[s - 1];
+    if (u.homeMode === 'base' && u.post >= 0) return GATE_GUARD[GUARD_IDX[u.post]];
     const ang = (s / SPAWN_PLAYER.length) * TAU + Math.PI / 4;
     return { x: FIRE.x + Math.cos(ang) * 120, y: FIRE.y + Math.sin(ang) * 120 };
   }
@@ -499,14 +551,7 @@
   function gatherMove(u) {
     const c = alertCenter();
     const e = nearestEnemy(u);
-    const de = e ? Math.hypot(e.x - u.x, e.y - u.y) : Infinity;
     const sp = WEAPONS[u.weapon].speed * 0.8;
-    if (e && de < 120) {
-      const dx = u.x - e.x, dy = u.y - e.y, d = de || 1;
-      u.vx = dx / d * sp; u.vy = dy / d * sp;
-      u.f = Math.atan2(e.y - u.y, e.x - u.x);
-      return;
-    }
     if (Math.hypot(c.x - u.x, c.y - u.y) > GATHER_R * 0.6) {
       const p = navPoint(u, c), dx = p.x - u.x, dy = p.y - u.y, d = Math.hypot(dx, dy) || 1;
       u.vx = dx / d * sp; u.vy = dy / d * sp;
@@ -514,10 +559,20 @@
       u.f = Math.atan2(e.y - u.y, e.x - u.x);
     }
   }
+  // Aliados de pie a r píxeles de u
+  function alliesNear(u, r) {
+    let n = 0;
+    for (const p of player) if (p !== u && !p.dead && !p.healer && Math.hypot(p.x - u.x, p.y - u.y) <= r) n++;
+    return n;
+  }
+  // Siempre se defienden si el enemigo está encima; si ven enemigos y están solos, llaman a la escuadra
   function guardThink(u, dt) {
-    if (!alert.active) {
-      const e = nearestEnemy(u);
-      if (e && Math.hypot(e.x - u.x, e.y - u.y) <= DETECT_R) startAlert(u);
+    const e = nearestEnemy(u);
+    const de = e ? Math.hypot(e.x - u.x, e.y - u.y) : Infinity;
+    if (de < 110) { think(u, dt); return; }
+    if (!alert.active && de <= DETECT_R) {
+      if (alliesNear(u, 150) >= 2) { think(u, dt); return; } // tiene apoyo: avanza y pelea
+      startAlert(u); // está solo: atrae a los demás
     }
     if (alert.active && alert.phase === 'engage') { think(u, dt); return; }
     if (alert.active) { gatherMove(u); return; }
@@ -529,6 +584,47 @@
     } else {
       const e = nearestEnemy(u);
       if (e) u.f = Math.atan2(e.y - u.y, e.x - u.x);
+    }
+  }
+
+  // Curandero: se mantiene detrás del aliado más cercano al enemigo; solo pelea si lo tienen encima
+  function healerThink(u, dt) {
+    // En modo base se queda en su casa
+    if (u.homeMode === 'base') {
+      const hx = HOUSE.x + HOUSE.w / 2, hy = HOUSE.y + HOUSE.h / 2;
+      const hd = Math.hypot(hx - u.x, hy - u.y), ne = nearestEnemy(u);
+      if (ne) u.f = Math.atan2(ne.y - u.y, ne.x - u.x);
+      if (ne && Math.hypot(ne.x - u.x, ne.y - u.y) < 34 && u.cd <= 0 && u.swing <= 0) startSwing(u);
+      if (hd > 8) {
+        const p = navPoint(u, { x: hx, y: hy }), px = p.x - u.x, py = p.y - u.y, pd = Math.hypot(px, py) || 1;
+        const sp = WEAPONS.knife.speed * 0.8;
+        u.vx = px / pd * sp; u.vy = py / pd * sp;
+      }
+      return;
+    }
+    const e = nearestEnemy(u);
+    const allies = player.filter(p => !p.dead && !p.healer);
+    if (!allies.length) { u.vx = 0; u.vy = 0; if (e) u.f = Math.atan2(e.y - u.y, e.x - u.x); return; }
+    const ref = e || FIRE;
+    let guard = allies[0], gd = Infinity;
+    for (const a of allies) {
+      const d = Math.hypot(a.x - ref.x, a.y - ref.y);
+      if (d < gd) { gd = d; guard = a; }
+    }
+    let bx = guard.x, by = guard.y;
+    if (e) {
+      const dx = guard.x - e.x, dy = guard.y - e.y, d = Math.hypot(dx, dy) || 1;
+      bx += dx / d * 50; by += dy / d * 50;
+    }
+    if (e) {
+      u.f = Math.atan2(e.y - u.y, e.x - u.x);
+      if (Math.hypot(e.x - u.x, e.y - u.y) < 34 && u.cd <= 0 && u.swing <= 0) startSwing(u);
+    }
+    const dx = bx - u.x, dy = by - u.y, d = Math.hypot(dx, dy);
+    if (d > 10) {
+      const p = navPoint(u, { x: bx, y: by }), px = p.x - u.x, py = p.y - u.y, pd = Math.hypot(px, py) || 1;
+      const sp = WEAPONS.knife.speed * 0.8;
+      u.vx = px / pd * sp; u.vy = py / pd * sp;
     }
   }
 
@@ -754,18 +850,19 @@
     { type: 'tent', x: 3070, y: 1830, sy: 1852 }
   ];
   const CATA = { type: 'cata', x: 3180, y: 1960, sy: 1985, cd: 3, fire: 0 };
+  const CATA_RANGE = 450; // alcance máximo de la catapulta, en px
   const CAMP_FIRE = { type: 'campfire', x: 3262, y: 2010, sy: 2020 };
   const BOULDERS = [];
   // Táctica enemiga: esperan en su campamento y atacan en grupo cuando tú te acercas
   // o pasan 20 s; eligen al soldado tuyo más herido y se retiran si quedan con poca vida
   const CAMP_HOLD = { x: 3250, y: 1860 };
   let enemyWave = false, enemyTimer = 0;
-  // La catapulta dispara a tu soldado más cercano en 700 px; la piedra cae con 30 de daño en 45 px
+  // La catapulta dispara a tu soldado más cercano en CATA_RANGE px; la piedra cae con 30 de daño en 45 px
   function updateCamp(dt) {
     CATA.cd -= dt;
     CATA.fire = Math.max(0, CATA.fire - dt);
     if (CATA.cd <= 0) {
-      let best = null, bd = 700;
+      let best = null, bd = CATA_RANGE;
       for (const p of units) {
         if (p.team !== 'player' || p.dead) continue;
         const d = Math.hypot(p.x - CATA.x, p.y - CATA.y);
@@ -779,8 +876,11 @@
         const s = KITCHEN.built ? KITCHEN : FIELD;
         const tx = s === KITCHEN ? KITCHEN.x : FIELD.x + FIELD.w / 2;
         const ty = s === KITCHEN ? KITCHEN.y : FIELD.y + FIELD.h / 2;
-        BOULDERS.push({ type: 'boulder', x0: CATA.x, y0: CATA.y, x: tx, y: ty, t: 0, dur: 1.1, struct: s });
-        CATA.cd = 12; CATA.fire = 0.25;
+        // Solo si el objetivo está dentro de su alcance
+        if (Math.hypot(tx - CATA.x, ty - CATA.y) <= CATA_RANGE) {
+          BOULDERS.push({ type: 'boulder', x0: CATA.x, y0: CATA.y, x: tx, y: ty, t: 0, dur: 1.1, struct: s });
+          CATA.cd = 12; CATA.fire = 0.25;
+        }
       }
     }
     for (let i = BOULDERS.length - 1; i >= 0; i--) {
@@ -871,7 +971,7 @@
   }
 
   // ---------- Cocina, campo, granjero y comidas de tu escuadra ----------
-  const FIELD = { type: 'field', x: 580, y: 1280, w: 200, h: 110, t: 0, sy: 1390 };
+  const FIELD = { type: 'field', x: 580, y: 1280, w: 200, h: 110, t: 0, sy: 1280 };
   const KITCHEN = { type: 'kitchen', x: 500, y: 1230, built: true, t: 0, sy: 1250 };
   const FOOD = { stock: 2 };
   const CROP_TIME = 50;
@@ -892,22 +992,34 @@
       if (KITCHEN.t >= 30) { KITCHEN.built = true; KITCHEN.t = 0; }
     }
   }
-  function toggleFire() { fireFree = !fireFree; }
   function cleanSeats() {
     for (const s of SEATS) if (s.user && (s.user.dead || !s.user.meal || s.user.meal.seat !== s)) s.user = null;
   }
-  // Nunca dejan una entrada sola: solo sale un guardia si su compañero de entrada está en su puesto
-  function slotPartner(u) {
-    const s = u.slot;
-    if (!s || s < 1) return null;
-    const p = s % 2 === 1 ? s + 1 : s - 1;
-    return player.find(q => q.slot === p) || null;
+  // Una guardia por entrada (índices de GATE_GUARD). Si cae un guardia, el soldado libre más cercano
+  // lo releva, siempre que haya al menos 3 guerreros en pie
+  const GUARD_IDX = [0, 2, 4];
+  function assignPosts() {
+    for (const p of player) {
+      if (p.post >= 0 && (p.dead || p.ctrl || p.healer || p.homeMode !== 'base')) p.post = -1;
+    }
+    const alive = player.filter(p => !p.dead && !p.ctrl && !p.healer);
+    if (alive.length < 3) return;
+    for (let post = 0; post < GUARD_IDX.length; post++) {
+      if (player.some(p => p.post === post && !p.dead)) continue;
+      const g = GATE_GUARD[GUARD_IDX[post]];
+      let best = null, bd = Infinity;
+      for (const p of alive) {
+        if (p.post >= 0 || p.homeMode !== 'base' || (p.meal && p.meal.state !== 'idle')) continue;
+        const d = Math.hypot(p.x - g.x, p.y - g.y);
+        if (d < bd) { bd = d; best = p; }
+      }
+      if (best) best.post = post;
+    }
   }
+  // Un guardia solo sale a comer si hay un relevo libre que ocupe su puesto
   function canLeavePost(u) {
-    if (u.homeMode !== 'base' || !u.slot || u.slot < 1) return true;
-    const partner = slotPartner(u);
-    if (!partner || partner.dead) return false;
-    return !(partner.meal && partner.meal.state !== 'idle');
+    if (u.homeMode !== 'base' || u.post < 0) return true;
+    return player.some(q => q !== u && !q.dead && !q.ctrl && !q.healer && q.homeMode === 'base' && q.post < 0 && !(q.meal && q.meal.state !== 'idle'));
   }
   function releaseMeal(u, returning) {
     const m = u.meal;
@@ -925,23 +1037,40 @@
     u.vx = qx / qd * sp; u.vy = qy / qd * sp;
     return false;
   }
-  // Comida: va a la cocina, toma su plato, se sienta en la fogata 5-9 s y regresa a su puesto
+  // Hambre: la barra baja sola. A 0 empieza la segunda ronda: busca comida, -10% velocidad, daño y vida
+  // máxima, y pierde 3 de vida por segundo hasta comer
+  function eatMeal(u) { u.hunger = 100; u.starving = false; u.hungry = false; FOOD.stock--; }
+  function hungerUpdate(u, dt) {
+    const eating = !!(u.meal && u.meal.state === 'eating') || (u.eatT || 0) > 0;
+    if (u.eatT > 0) { u.eatT -= dt; if (u.eatT <= 0) { u.eatT = 0; u.hunger = 100; u.starving = false; } }
+    if (!eating) u.hunger = Math.max(0, u.hunger - dt * 100 / 120);
+    if (u.hunger <= 0 && !u.starving) { u.starving = true; addEffect(u.x, u.y - 60, '¡Hambre!', '#ff9a6a'); }
+    if (u.starving && !eating) {
+      u.hp = Math.min(u.hp, 90) - 3 * dt;
+      if (u.hp <= 0) { u.hp = 0; u.dead = true; u.target = null; }
+    }
+    // Controlado a mano: come al llegar a la cocina
+    const cp = counterPos();
+    if (u.ctrl && u.starving && FOOD.stock > 0 && Math.hypot(u.x - cp.x, u.y - cp.y) < 50) eatMeal(u);
+  }
+  // Comida: va a la cocina cuando tiene hambre, toma su plato, se sienta en la fogata 5-9 s y regresa a su puesto
   function mealUpdate(u, dt) {
     if (!u.meal) u.meal = { state: 'idle', timer: 30 + rand() * 50, seat: null, t: 0, dur: 6 };
     const m = u.meal;
     if (u.ctrl || alert.active) { if (m.state !== 'idle') releaseMeal(u, false); return false; }
     const sp = WEAPONS[u.weapon].speed * 0.7;
     if (m.state === 'idle') {
-      m.timer -= dt;
-      if (m.timer > 0 || !canLeavePost(u)) return false;
+      // Solo sale a comer si tiene hambre, no hay enemigos cerca y puede dejar su puesto
+      if (!u.starving || !canLeavePost(u) || nearestEnemyDist(u) < 220) return false;
       m.state = 'toKitchen';
+      u.post = -1; // libera su puesto para el relevo
     }
     if (m.state === 'toKitchen') {
       if (!walkStep(u, counterPos(), sp)) return true;
       const seat = SEATS.find(s => !s.user);
       if (!seat) return true;
-      if (FOOD.stock <= 0) { u.hungry = true; releaseMeal(u, false); m.timer = 12; return false; }
-      FOOD.stock--; u.hungry = false;
+      if (FOOD.stock <= 0) { u.hungry = true; return true; } // espera en la cocina a que haya comida
+      eatMeal(u);
       seat.user = u; m.seat = seat; m.state = 'toSeat';
       return true;
     }
@@ -1155,6 +1284,16 @@
   function enemyThink(u, dt) {
     const aliveE = enemy.filter(e => !e.dead).length;
     enemyTimer += dt;
+    // Hambriento y sin combate cerca: va a su fogata y come
+    if (u.starving && nearestPlayerDist(u) > 260) {
+      if (u.eatT > 0) { u.vx = 0; u.vy = 0; return; }
+      const cd = Math.hypot(CAMP_FIRE.x - u.x, CAMP_FIRE.y - u.y);
+      if (cd > 30) {
+        const p = navPoint(u, CAMP_FIRE), px = p.x - u.x, py = p.y - u.y, pd = Math.hypot(px, py) || 1;
+        u.vx = px / pd * 70; u.vy = py / pd * 70;
+      } else { u.eatT = 5; u.vx = 0; u.vy = 0; }
+      return;
+    }
     if (!enemyWave) {
       const pc = units.some(p => p.team === 'player' && !p.dead && Math.hypot(p.x - CAMP_HOLD.x, p.y - CAMP_HOLD.y) < 700);
       if (pc || enemyTimer > 20) { enemyWave = true; enemyTimer = 0; }
@@ -1181,6 +1320,7 @@
 
   function updateUnits(dt) {
     updateAlert(dt);
+    assignPosts();
     updateHorse();
     updateDummies(dt);
     updateCamp(dt);
@@ -1195,6 +1335,7 @@
       u.fireT = Math.max(0, (u.fireT || 0) - dt);
       u.flash = Math.max(0, u.flash - dt);
       u.blockT = Math.max(0, u.blockT - dt);
+      if (u.team !== 'civ') { hungerUpdate(u, dt); if (u.dead) continue; }
 
       if (u.swing > 0) {
         u.swing -= dt;
@@ -1204,7 +1345,12 @@
 
       u.vx = 0; u.vy = 0;
       if (u.ctrl) {
-        u.blocking = rmb || touchBlock;
+        // Bloqueo: dura hasta 1 s y solo se puede volver a activar 2 s después de empezar
+        const wantBlock = (rmb || touchBlock) && u.shield;
+        u.blockCd = Math.max(0, (u.blockCd || 0) - dt);
+        u.blockDur = Math.max(0, (u.blockDur || 0) - dt);
+        if (wantBlock && !u.blocking && u.blockCd <= 0) { u.blocking = true; u.blockDur = 1; u.blockCd = 2; }
+        if (u.blocking && (!wantBlock || u.blockDur <= 0)) u.blocking = false;
         if (!touchMode && u.swing <= 0) u.f = Math.atan2(my - u.y, mx - u.x);
         let dx = 0, dy = 0;
         if (keys.has('a') || keys.has('arrowleft')) dx -= 1;
@@ -1222,7 +1368,8 @@
         }
       } else {
         u.blocking = u.blockT > 0;
-        if (u.team === 'player' && u.mode !== 'attack') { if (!mealUpdate(u, dt)) guardThink(u, dt); }
+        if (u.healer) healerThink(u, dt);
+        else if (u.team === 'player' && u.mode !== 'attack') { if (!mealUpdate(u, dt)) guardThink(u, dt); }
         else if (u.team === 'enemy') enemyThink(u, dt);
         else if (u.team === 'civ') farmThink(u, dt);
         else think(u, dt);
@@ -1231,6 +1378,7 @@
       let k = 1;
       if (u.swing > 0) k = 0.3;
       if (u.blocking) k = Math.min(k, 0.4);
+      if (u.starving) k *= 0.9; // hambriento: 10% más lento
       for (const p of PITS) {
         if (Math.hypot(u.x - p.x, u.y - p.y) < p.r) {
           k = Math.min(k, 0.35);
@@ -1253,7 +1401,7 @@
     for (let i = 0; i < units.length; i++) {
       for (let j = i + 1; j < units.length; j++) {
         const a = units[i], b = units[j];
-        if (a.dead || b.dead) continue;
+        if (a.dead || b.dead || a.team === b.team) continue; // los del mismo bando no chocan
         const dx = b.x - a.x, dy = b.y - a.y;
         const d = Math.hypot(dx, dy), min = 28;
         if (d < min) {
@@ -1274,18 +1422,17 @@
   }
 
   function fireArrow(u, spread) {
-    if (u.team === 'player' && !u.ctrl && !fireFree) return;
     const R = WEAPONS.bow.ranged;
     u.cd = WEAPONS.bow.cd;
     u.fireT = 0.25;
     const a = u.f + (rand() * 2 - 1) * spread;
     arrows.push({ x: u.x, y: u.y, sx: u.x, sy: u.y, vx: Math.cos(a) * R.speed, vy: Math.sin(a) * R.speed,
-                  team: u.team, range: R.range, dmg: R.dmg });
+                  team: u.team, range: R.range, dmg: R.dmg * (u.starving ? 0.9 : 1) });
   }
 
   // Ataque manual o de la IA: el arco dispara, o usa la espada corta si el enemigo está pegado
   function doAttack(u) {
-    if (rackOpen || u.cd > 0 || u.swing > 0) return;
+    if (u.cd > 0 || u.swing > 0) return;
     if (u.weapon === 'bow') {
       if (nearestEnemyDist(u) <= 40) startSwing(u);
       else {
@@ -1302,9 +1449,11 @@
     const toShooter = Math.atan2(a.sy - e.y, a.sx - e.x);
     const facing = Math.abs(angDiff(toShooter, e.f)) < 1.6;
     let dmg = a.dmg;
-    if (e.blocking && facing) {
-      dmg = a.dmg * (e.shield ? 0.4 : 0.7);
-      addEffect(e.x, e.y - 50, (e.shield ? 'ESCUDO -' : 'PARADA -') + Math.round(dmg), '#7fd3ff');
+    if (e.mounted) dmg *= 0.7; // a caballo recibes 30% menos daño
+    if (e.blocking && e.shield && facing) {
+      // Solo el escudo visible al frente bloquea: la mitad del daño
+      dmg *= 0.5;
+      addEffect(e.x, e.y - 50, 'ESCUDO -' + Math.round(dmg), '#7fd3ff');
     } else {
       addEffect(e.x, e.y - 50, '-' + Math.round(dmg), '#ff6b6b');
     }
@@ -1343,6 +1492,37 @@
     for (const u of player) {
       if (u.dead || u.hp >= 100) continue;
       if (Math.hypot(u.x - FIRE.x, u.y - FIRE.y) <= HEAL_R) u.hp = Math.min(100, u.hp + HEAL_RATE * dt);
+    }
+  }
+
+  // Curandero: cada 2 s cura 20 de vida al aliado herido más bajo que esté a 120 px
+  function healerPulse(dt) {
+    for (const h of player) {
+      if (!h.healer || h.dead) continue;
+      h.healCd = Math.max(0, (h.healCd || 0) - dt);
+      if (h.healCd > 0) continue;
+      let best = null;
+      for (const p of player) {
+        if (p.dead || p.hp >= 100) continue;
+        if (Math.hypot(p.x - h.x, p.y - h.y) > 120) continue;
+        if (!best || p.hp < best.hp) best = p;
+      }
+      if (best) {
+        best.hp = Math.min(100, best.hp + 20); h.healCd = 2;
+        addEffect(best.x, best.y - 50, '+20', '#6ccf4f');
+      }
+    }
+  }
+
+  // Casa del curandero: rápida con el curandero dentro, muy lenta sin él
+  function inHouse(u) {
+    return u.x >= HOUSE.x && u.x <= HOUSE.x + HOUSE.w && u.y >= HOUSE.y && u.y <= HOUSE.y + HOUSE.h;
+  }
+  function houseHeal(dt) {
+    const healerIn = player.some(h => h.healer && !h.dead && inHouse(h));
+    for (const p of player) {
+      if (p.dead || p.hp >= 100 || !inHouse(p)) continue;
+      p.hp = Math.min(100, p.hp + (healerIn ? 25 : 1.5) * dt);
     }
   }
 
@@ -1431,7 +1611,7 @@
     const { x, y } = r;
     if (canUseRack()) {
       ctx.strokeStyle = 'rgba(255,217,102,0.6)'; ctx.lineWidth = 2; ctx.setLineDash([4, 4]);
-      ctx.beginPath(); ctx.arc(x, y, 90, 0, TAU); ctx.stroke(); ctx.setLineDash([]);
+      ctx.beginPath(); ctx.arc(x, y, 50, 0, TAU); ctx.stroke(); ctx.setLineDash([]);
     }
     ctx.fillStyle = 'rgba(0,0,0,0.25)';
     ctx.beginPath(); ctx.ellipse(x, y + 3, 30, 9, 0, 0, TAU); ctx.fill();
@@ -1455,6 +1635,54 @@
     // arco colgado
     ctx.strokeStyle = '#7a5230'; ctx.lineWidth = 2.5; ctx.lineCap = 'round';
     ctx.beginPath(); ctx.moveTo(x + 15, y - 42); ctx.quadraticCurveTo(x + 22, y - 28, x + 15, y - 14); ctx.stroke();
+  }
+
+  // ---------- Dibujo de la casa del curandero: refugio de paja, barro y hierbas ----------
+  function drawHouse(h, t) {
+    const { x, y, w, h: hh } = h;
+    // zona de curación: suelo de hierbas
+    ctx.fillStyle = 'rgba(110,220,140,0.16)'; ctx.fillRect(x - 6, y - 4, w + 12, hh + 8);
+    ctx.fillStyle = '#5e4a2c'; ctx.fillRect(x - 6, y + 40, w + 12, hh - 36);
+    for (let i = 0; i < 28; i++) {
+      const hx = x - 2 + (i * 37) % (w + 4), hy = y + 46 + (i * 53) % (hh - 44);
+      ctx.fillStyle = i % 5 === 0 ? '#b07ad6' : i % 3 === 0 ? '#f0f0e0' : '#4f8a34';
+      ctx.beginPath(); ctx.arc(hx, hy, 2.2, 0, TAU); ctx.fill();
+    }
+    // pared de barro con entramado de ramas
+    ctx.fillStyle = 'rgba(0,0,0,0.28)'; ctx.fillRect(x + 4, y + 16, w + 4, 6);
+    ctx.fillStyle = '#d8c49a'; ctx.fillRect(x, y + 14, w, 30);
+    ctx.strokeStyle = '#8a6a3a'; ctx.lineWidth = 1.5;
+    for (let i = -10; i < w + 20; i += 10) { ctx.beginPath(); ctx.moveTo(x + i, y + 14); ctx.lineTo(x + i + 14, y + 44); ctx.stroke(); }
+    // postes de madera
+    ctx.fillStyle = '#6b4a2b';
+    ctx.fillRect(x - 3, y + 12, 6, hh - 14); ctx.fillRect(x + w - 3, y + 12, 6, hh - 14);
+    // viga con manojos de hierbas colgando
+    ctx.fillStyle = '#5b3d24'; ctx.fillRect(x + 4, y + 10, w - 8, 4);
+    for (const bx of [x + 18, x + 36, x + w - 36, x + w - 18]) {
+      ctx.strokeStyle = '#7a5230'; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(bx, y + 14); ctx.lineTo(bx, y + 22); ctx.stroke();
+      ctx.fillStyle = '#4f8a34'; ctx.beginPath(); ctx.ellipse(bx, y + 27, 4, 7, 0, 0, TAU); ctx.fill();
+      ctx.fillStyle = '#6aa44a'; ctx.beginPath(); ctx.ellipse(bx - 2, y + 25, 1.8, 4, -0.4, 0, TAU); ctx.fill();
+    }
+    // techo de paja a dos aguas con borde oscuro
+    ctx.fillStyle = '#c9a24a';
+    ctx.beginPath(); ctx.moveTo(x - 14, y + 16); ctx.lineTo(x + w / 2, y - 18); ctx.lineTo(x + w + 14, y + 16); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#a88230'; ctx.fillRect(x - 14, y + 12, w + 28, 5);
+    ctx.strokeStyle = '#8c6a2a'; ctx.lineWidth = 1;
+    for (let i = 0; i < 5; i++) { ctx.beginPath(); ctx.moveTo(x + 10 + i * 18, y + 12); ctx.lineTo(x + w / 2, y - 16); ctx.stroke(); }
+    // mesa con mortero, tarros, frascos y hierbas
+    ctx.fillStyle = '#7a5230'; ctx.fillRect(x + 14, y + hh - 22, w - 28, 6);
+    ctx.fillStyle = '#4a2f18'; ctx.fillRect(x + 16, y + hh - 16, 3, 16); ctx.fillRect(x + w - 19, y + hh - 16, 3, 16);
+    ctx.fillStyle = '#8a8a86'; ctx.beginPath(); ctx.ellipse(x + 26, y + hh - 26, 7, 3.5, 0, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#5a5a56'; ctx.fillRect(x + 30, y + hh - 36, 2.5, 11);
+    ctx.fillStyle = '#b5673a'; ctx.beginPath(); ctx.ellipse(x + 52, y + hh - 27, 5, 6, 0, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#7fc8a9'; ctx.fillRect(x + 62, y + hh - 33, 4, 12); ctx.fillRect(x + 68, y + hh - 31, 4, 10);
+    ctx.fillStyle = '#4f8a34'; ctx.beginPath(); ctx.ellipse(x + w - 26, y + hh - 27, 6, 4, 0, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#6aa44a'; ctx.beginPath(); ctx.ellipse(x + w - 33, y + hh - 28, 4, 3, 0, 0, TAU); ctx.fill();
+    // letrero
+    ctx.fillStyle = '#ffd966'; ctx.font = 'bold 9px system-ui, sans-serif'; ctx.textAlign = 'center';
+    ctx.fillText('CURANDERO', x + w / 2, y + hh + 10);
+    ctx.textAlign = 'left';
   }
 
   // ---------- Dibujo de la fogata ----------
@@ -1522,6 +1750,10 @@
       ctx.fillStyle = '#7a5230'; ctx.fillRect(-14, -1, 74 + ext, 2);
       ctx.fillStyle = '#cfd6de';
       ctx.beginPath(); ctx.moveTo(60 + ext, -3); ctx.lineTo(72 + ext, 0); ctx.lineTo(60 + ext, 3); ctx.fill();
+    } else if (kind === 'knife') {
+      ctx.fillStyle = '#5b3d24'; ctx.fillRect(-4, -1, 5, 2.5);
+      ctx.fillStyle = '#dfe6ee';
+      ctx.beginPath(); ctx.moveTo(1, -1.5); ctx.lineTo(16, -1); ctx.lineTo(18, 0); ctx.lineTo(16, 1); ctx.lineTo(1, 1.5); ctx.fill();
     } else if (kind === 'hoe') {
       ctx.fillStyle = '#7a5230'; ctx.fillRect(-12, -1, 34, 2);
       ctx.fillStyle = '#9aa3ad';
@@ -1542,8 +1774,8 @@
 
   function drawUnit(u, t) {
     const isEnemy = u.team === 'enemy';
-    const tunic = u.flash > 0 ? '#f0e0a0' : (u.team === 'civ' ? '#8a6a3a' : isEnemy ? '#a8322b' : '#2f6fb0');
-    const helmet = u.team === 'civ' ? '#d9b050' : isEnemy ? '#5a5f66' : '#9aa3ad';
+    const tunic = u.flash > 0 ? '#f0e0a0' : u.healer ? '#e9efe0' : (u.team === 'civ' ? '#8a6a3a' : isEnemy ? '#a8322b' : '#2f6fb0');
+    const helmet = u.healer ? '#3f9e5a' : u.team === 'civ' ? '#d9b050' : isEnemy ? '#5a5f66' : '#9aa3ad';
     if (u.mounted && !u.dead) drawHorseAt(u.x, u.y, u.f, t, !!(u.vx || u.vy));
     ctx.save();
     ctx.translate(u.x, u.y);
@@ -1587,6 +1819,10 @@
     ctx.fillRect(-7, -33 + bob, 14, 20);
     ctx.fillStyle = '#3b2817';
     ctx.fillRect(-7, -18 + bob, 14, 2.5);
+    if (u.healer) { // cruz roja del curandero
+      ctx.fillStyle = '#d6453d';
+      ctx.fillRect(-1, -29 + bob, 2, 7); ctx.fillRect(-3.5, -27.5 + bob, 7, 2);
+    }
 
     // cabeza y casco
     ctx.fillStyle = '#e0b48a';
@@ -1620,11 +1856,15 @@
       ctx.textAlign = 'left';
     }
     // barra de vida y marcador del soldado controlado
-    if (u.hp < 100 || u.ctrl) {
-      ctx.fillStyle = 'rgba(0,0,0,0.6)';
-      ctx.fillRect(u.x - 15, u.y - 62, 30, 5);
-      ctx.fillStyle = u.hp > 50 ? '#6ccf4f' : '#e74c3c';
-      ctx.fillRect(u.x - 15, u.y - 62, 30 * u.hp / 100, 5);
+    // barra de vida: siempre visible
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    ctx.fillRect(u.x - 15, u.y - 62, 30, 5);
+    ctx.fillStyle = u.hp > 50 ? '#6ccf4f' : '#e74c3c';
+    ctx.fillRect(u.x - 15, u.y - 62, 30 * u.hp / 100, 5);
+    if (u.team !== 'civ') { // barra de hambre: fina, bajo la de vida; amarilla, morada si está hambriento
+      ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(u.x - 15, u.y - 55, 30, 2);
+      ctx.fillStyle = u.starving ? '#9b59b6' : '#f2c14e';
+      ctx.fillRect(u.x - 15, u.y - 55, 30 * u.hunger / 100, 2);
     }
     if (u.ctrl) {
       ctx.fillStyle = '#ffd966';
@@ -1660,7 +1900,6 @@
     if (/^[1-5]$/.test(k)) equip(RACK[Number(k) - 1]);
     else if (k === 'g') toggleRack();
     else if (k === 'm') toggleMount();
-    else if (k === 'f') toggleFire();
     else if (k === 'e') orderAttack();
     else if (k === 'r') orderDefend();
     else if (k === 'b') orderBase();
@@ -1725,15 +1964,20 @@
   function closeRack() { rack.hidden = true; rackOpen = false; }
   // El estante es físico: solo se usa estando cerca de él
   function canUseRack() {
-    return !!control && !control.dead && Math.hypot(control.x - RACK_POS.x, control.y - RACK_POS.y) <= 90;
+    return !!control && !control.dead && Math.hypot(control.x - RACK_POS.x, control.y - RACK_POS.y) <= 50;
+  }
+  // Se abre sola al pararte junto al estante y se cierra al alejarte; "Cerrar" la oculta hasta que te alejes
+  let rackDismissed = false;
+  function syncRack() {
+    if (!canUseRack()) { rackDismissed = false; if (rackOpen) closeRack(); return; }
+    if (!rackOpen && !rackDismissed) openRack();
   }
   function toggleRack() {
-    if (rackOpen) { closeRack(); return; }
     if (!canUseRack()) {
       if (control && !control.dead) addEffect(control.x, control.y - 60, 'Ve al estante', '#ffd966');
       return;
     }
-    openRack();
+    if (rackOpen) { rackDismissed = true; closeRack(); } else { rackDismissed = false; openRack(); }
   }
 
   // Órdenes de escuadra con un solo botón
@@ -1746,8 +1990,8 @@
   rack.addEventListener('click', e => {
     const b = e.target.closest('button');
     if (!b) return;
-    if (b.dataset.rk === 'close') closeRack();
-    else { equip(b.dataset.rk); closeRack(); }
+    if (b.dataset.rk === 'close') { rackDismissed = true; closeRack(); }
+    else equip(b.dataset.rk);
   });
   // Cambiar de arma tarda 0.8 s (desenvainar)
   function equip(w) {
@@ -1756,10 +2000,12 @@
       if (control && !control.dead) addEffect(control.x, control.y - 60, 'Ve al estante', '#ffd966');
       return;
     }
+    if (control.healer) { addEffect(control.x, control.y - 60, 'Curandero: solo cuchillo', '#ffd966'); return; }
     const u = control;
     u.weapon = w; u.shield = WEAPONS[w].shield;
     u.swing = 0; u.hitDone = false; u.cd = 0.8;
     u.blocking = false; u.blockT = 0;
+    if (rackOpen) buildRack();
     addEffect(u.x, u.y - 60, 'Cambiado: ' + WEAPONS[w].name, '#ffd966');
   }
 
@@ -1814,7 +2060,6 @@
       } else if (act === 'squad') toggleSquad();
       else if (act === 'base') orderBase();
       else if (act === 'mount') toggleMount();
-      else if (act === 'fire') toggleFire();
       else if (act === 'rack') toggleRack();
       else if (act === 'zoom') { zoomIdx = (zoomIdx + 1) % ZOOMS.length; zoom = ZOOMS[zoomIdx]; clampCamera(); }
     });
@@ -1849,7 +2094,7 @@
     for (const s of SEATS) items.push(s);
     for (const d of DUMMIES) items.push(d);
     items.push(...TENTS, CATA, CAMP_FIRE);
-    items.push(FIELD, KITCHEN);
+    items.push(FIELD, KITCHEN, HOUSE);
     for (const b of BOULDERS) items.push(b);
     for (const p of PITS) items.push(p);
     if (!horse.rider) items.push(horse);
@@ -1870,6 +2115,7 @@
       else if (it.type === 'boulder') drawBoulder(it);
       else if (it.type === 'field') drawField(it);
       else if (it.type === 'kitchen') drawKitchen(it, t);
+      else if (it.type === 'house') drawHouse(it, t);
       else if (it.type === 'horse') drawHorseAt(it.x, it.y, it.f, t, it.moving);
       else drawUnit(it, t);
     }
@@ -1890,8 +2136,6 @@
     setSquadLabel();
     const rb = document.querySelector('#ring .b-rack');
     if (rb) rb.hidden = !canUseRack();
-    const fb = document.querySelector('#ring .b-fire');
-    if (fb) fb.textContent = fireFree ? 'Fuego: sí' : 'Fuego: no';
     const mb = document.querySelector('#ring .b-mount');
     if (mb) {
       const show = !!control && !control.dead && (control.mounted || nearHorse());
@@ -1903,7 +2147,7 @@
     hud.innerHTML =
       `<b>Controlas:</b> ${WEAPONS[control.weapon].name} · vida ${Math.ceil(control.hp)}` +
       `${control.blocking ? ' · <b>bloqueando</b>' : ''}<br>` +
-      `Tu escuadra (azul): ${pa}/${player.length} · Enemigo (rojo): ${ea} · Comida: ${FOOD.stock}<br>` +
+      `Tu escuadra (azul): ${pa}/${player.length} · Ejército de Claude (rojo): ${ea} · Comida: ${FOOD.stock}<br>` +
       `<span class="keyhelp">WASD mover · Mouse apuntar · Clic izq. atacar · Mantén clic der. defender · ` +
       `E escuadra atacar · R fogata · B base · Tab cambiar soldado · 1-5 o G estante · M montar · Rueda zoom</span>` +
       `<span class="touchhelp">Joystick: mover · Botones: atacar, defender y órdenes a tu escuadra</span>`;
@@ -1964,9 +2208,12 @@
   function frame(now) {
     const dt = Math.min(0.05, (now - last) / 1000);
     last = now;
-    if (!ended && !rackOpen) {
+    syncRack();
+    if (!ended) {
       updateUnits(dt);
       healNearFire(dt);
+      healerPulse(dt);
+      houseHeal(dt);
       updateArrows(dt);
       for (const e of effects) e.t += dt;
       for (let i = effects.length - 1; i >= 0; i--) if (effects[i].t > 0.9) effects.splice(i, 1);

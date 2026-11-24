@@ -49,3 +49,42 @@
 - Preferencias del usuario: sin saludos ni frases de relleno; no preguntas personales; no repetir frases.
 - Pruebas: copia de prueba con window.__g en /tmp/patch/test.html (no se publica).
 
+## Entrada 2 · 2026-11-24
+
+### Mi ejército (usuario)
+- Pidió corregir que su ejército se atorara en las entradas y que ignorara órdenes de ataque.
+- Bloqueo: solo 1 vez cada 2 s (dura hasta 1 s).
+- Montado: -30% de daño recibido.
+- Curandero: piel distinta (túnica blanca, capucha verde, cruz roja), cuchillo, se mantiene detrás de un aliado. Cura 20 cada 2 s a 120 px.
+- Casa del curandero: en modo base el curandero se queda ahí. Dentro, curación rápida (25/s) si el curandero está dentro; si no, 1.5/s.
+- Quitar restricción de Fuego: se quitaron el botón y la tecla F.
+- Cultivos no deben tapar personajes ni el estante. Estante junto a los muñecos de paja (1165,600); el panel aparece en la esquina inferior izquierda.
+- Ejército que rodea murallas, no se estrella.
+- Hambre: barra secundaria; a 0, segunda ronda (busca comida, -10% velocidad/daño/vida máxima, -3 HP/s hasta comer). No sale a comer si está en combate o si no hay relevo.
+- Relevo: si cae un guardia de entrada, el soldado libre más cercano lo releva (mínimo 3 guerreros en pie). Una guardia por entrada.
+- Sin colisión entre aliados del mismo bando.
+- Barra de vida visible siempre; barra de hambre distinta (fina, amarilla / morada si hambriento).
+- Pelea: siempre responde si el enemigo está a menos de 110 px; si ve enemigos y tiene 2+ aliados cerca, avanza; si está solo, llama a la escuadra.
+- Estante: abre solo al estar a 50 px, se cierra al alejarse, no pausa el juego, cambio de arma con un clic.
+- Marcador: "Ejército de Claude (rojo)".
+
+### Ejército rival (Claude)
+- Añadido: 1 arquero y 1 lanza (8 contra 8 tras el curandero); luego 1 arquero más para igualar.
+- Catapulta: alcance 450 px; el disparo de respaldo a cocina/campo solo si está en alcance.
+- Hambre enemiga: sin combate a 260 px, va a su fogata del campamento y come 5 s. Interpretación de "tus soldados también tienen hambre".
+- Navegación por grafo de esquinas de muros: rodeo y paso por entradas (corrige atasco en entradas).
+- Stats de HP y daño NO modificados en ninguna ronda.
+- Trampas de estacas, catapulta y ola de ataque: sin cambios de regla salvo alcance.
+
+### Decisiones tomadas por mí (interpretaciones)
+- "Bloquear 1 vez cada 2 s" = bloqueo dura 1 s y se puede activar otra vez 2 s después.
+- "Hambre baja" = penalidades al llegar a 0.
+- "Tus soldados también tienen hambre" = enemigos también.
+- "Mi ejército" en mis respuestas = ejército de Claude.
+
+### Pendiente / conocido
+- No verificado en navegador; solo lectura del código.
+- Cambios sin commit (repo /home/user/Nose, archivo tu-vs-mi/index.html).
+- Versión publicada: artifact https://claude.ai/artifact/NvvoZbkaQU5TtDW2dAnhis (versión 6).
+- Balance no verificado: un 3 contra 3 en entradas puede seguir siendo frágil si los guardias se quedan con hambre.
+
