@@ -861,7 +861,11 @@
   const CAMP_HOLD = { x: 3250, y: 1860 };
   let enemyWave = false, enemyTimer = 0;
   // La catapulta dispara a tu soldado más cercano en CATA_RANGE px; la piedra cae con 30 de daño en 45 px
+  // Economía enemiga: su campo produce 3 raciones cada 50 s (mismo ritmo que el tuyo), máximo 10
+  const ENEMY_FOOD = { stock: 2, t: 0 };
   function updateCamp(dt) {
+    ENEMY_FOOD.t += dt;
+    if (ENEMY_FOOD.t >= CROP_TIME) { ENEMY_FOOD.t = 0; ENEMY_FOOD.stock = Math.min(10, ENEMY_FOOD.stock + 3); }
     CATA.cd -= dt;
     CATA.fire = Math.max(0, CATA.fire - dt);
     if (CATA.cd <= 0) {
@@ -982,6 +986,7 @@
   const counterPos = () => ({ x: KITCHEN.x + 34, y: KITCHEN.y + 26 });
   function resetEconomy() {
     FIELD.t = 0; FOOD.stock = 2; fireFree = false;
+    ENEMY_FOOD.stock = 2; ENEMY_FOOD.t = 0;
     KITCHEN.built = true; KITCHEN.t = 0;
     for (const s of SEATS) s.user = null;
     FARMER = makeUnit('civ', 'hoe', 540, 1300, 0, 'fogata');
@@ -1000,7 +1005,8 @@
   }
   // Una guardia por entrada (índices de GATE_GUARD). Si cae un guardia, el soldado libre más cercano
   // lo releva, siempre que haya al menos 3 guerreros en pie
-  const GUARD_IDX = [0, 2, 4];
+  // Dos guardias por entrada: parejas (0,1), (2,3), (4,5)
+  const GUARD_IDX = [0, 1, 2, 3, 4, 5];
   function assignPosts() {
     for (const p of player) {
       if (p.post >= 0 && (p.dead || p.ctrl || p.healer || p.homeMode !== 'base')) p.post = -1;
@@ -1020,9 +1026,11 @@
     }
   }
   // Un guardia solo sale a comer si hay un relevo libre que ocupe su puesto
+  // Cada entrada tiene dos guardias: solo sale uno a comer si su compañero está en su puesto
   function canLeavePost(u) {
     if (u.homeMode !== 'base' || u.post < 0) return true;
-    return player.some(q => q !== u && !q.dead && !q.ctrl && !q.healer && q.homeMode === 'base' && q.post < 0 && !(q.meal && q.meal.state !== 'idle'));
+    const partner = u.post ^ 1;
+    return player.some(q => q !== u && !q.dead && !q.ctrl && !q.healer && q.homeMode === 'base' && q.post === partner && !(q.meal && q.meal.state !== 'idle'));
   }
   function releaseMeal(u, returning) {
     const m = u.meal;
@@ -1294,7 +1302,11 @@
       if (cd > 30) {
         const p = navPoint(u, CAMP_FIRE), px = p.x - u.x, py = p.y - u.y, pd = Math.hypot(px, py) || 1;
         u.vx = px / pd * 70; u.vy = py / pd * 70;
-      } else { u.eatT = 5; u.vx = 0; u.vy = 0; }
+      } else {
+        // Igual que tu escuadra: come solo si hay comida en el campamento (se consume una ración)
+        if (!(u.eatT > 0) && ENEMY_FOOD.stock > 0) { ENEMY_FOOD.stock--; u.eatT = 5; }
+        u.vx = 0; u.vy = 0;
+      }
       return;
     }
     if (!enemyWave) {
