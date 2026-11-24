@@ -361,8 +361,10 @@
     { x: FX1 - FORT_T - 50, y: FMY - 40 }, { x: FX1 - FORT_T - 50, y: FMY + 40 }
   ];
   // Torre de vigilancia junto a la entrada principal (la del frente): su arquero ve a lo lejos y avisa
-  const TOWER = { type: 'tower', x: FX1 - 120, y: FMY - 170, sy: FMY - 150 };
-  const TOWER_HOLD = { x: FX1 - 90, y: FMY - 150 };
+  const TOWER = { type: 'tower', x: FX1 - 120, y: FMY - 170, sy: FMY - 170, h: 150 };
+  // Pie de la torre (delante de la base); desde aquí el arquero sube al puesto de arriba
+  const TOWER_HOLD = { x: FX1 - 120, y: FMY - 156 };
+  const TOWER_TOP_LIFT = 142;
   const TOWER_SIGHT = 700;
   const GATE_POINT = { x: FX1 - 90, y: FMY };
   let towerMode = 'none';
@@ -543,6 +545,10 @@
     addEffect(TOWER.x, TOWER.y - 60, mode === 'one' ? '¡Un enemigo!' : '¡Ataque!', '#ff6b6b');
   }
   function towerThink(u, dt) {
+    // Sube al puesto de arriba al llegar a la base y baja cuando se va a comer o a otro lugar
+    const atBase = Math.hypot(TOWER_HOLD.x - u.x, TOWER_HOLD.y - u.y) <= 12;
+    const up = atBase && !(u.meal && u.meal.state !== 'idle') ? TOWER_TOP_LIFT : 0;
+    u.climb = (u.climb || 0) + clamp(up - (u.climb || 0), -dt * 120, dt * 120);
     // Solo baja a comer si su compañero de torre está arriba; si no, espera a que vuelva
     const partner = player.find(q => q !== u && q.tower && !q.dead);
     const partnerBusy = partner && partner.meal && partner.meal.state !== 'idle';
@@ -906,6 +912,9 @@
     { type: 'tent', x: 3070, y: 1830, sy: 1852 }
   ];
   const CATA = { type: 'cata', x: 3180, y: 1960, sy: 1985, cd: 3, fire: 0 };
+  // Respuesta a tu torre: una segunda catapulta en el campamento
+  const CATA2 = { type: 'cata', x: 3060, y: 1960, sy: 1985, cd: 6, fire: 0 };
+  const CATAS = [CATA, CATA2];
   const CATA_RANGE = 450; // alcance máximo de la catapulta, en px
   const CAMP_FIRE = { type: 'campfire', x: 3262, y: 2010, sy: 2020 };
   const BOULDERS = [];
@@ -919,29 +928,31 @@
   function updateCamp(dt) {
     ENEMY_FOOD.t += dt;
     if (ENEMY_FOOD.t >= CROP_TIME) { ENEMY_FOOD.t = 0; ENEMY_FOOD.stock = Math.min(10, ENEMY_FOOD.stock + 3); }
-    CATA.cd -= dt;
-    CATA.fire = Math.max(0, CATA.fire - dt);
-    if (CATA.cd <= 0) {
+    for (const C of CATAS) {
+    C.cd -= dt;
+    C.fire = Math.max(0, C.fire - dt);
+    if (C.cd <= 0) {
       let best = null, bd = CATA_RANGE;
       for (const p of units) {
         if (p.team !== 'player' || p.dead) continue;
-        const d = Math.hypot(p.x - CATA.x, p.y - CATA.y);
+        const d = Math.hypot(p.x - C.x, p.y - C.y);
         if (d < bd) { bd = d; best = p; }
       }
       if (best) {
-        BOULDERS.push({ type: 'boulder', x0: CATA.x, y0: CATA.y, x: best.x, y: best.y, t: 0, dur: 1.1, struct: null });
-        CATA.cd = 5; CATA.fire = 0.25;
+        BOULDERS.push({ type: 'boulder', x0: C.x, y0: C.y, x: best.x, y: best.y, t: 0, dur: 1.1, struct: null });
+        C.cd = 5; C.fire = 0.25;
       } else {
         // Sin soldados a tiro: la catapulta ataca tu economía (cocina si existe, si no el campo)
         const s = KITCHEN.built ? KITCHEN : FIELD;
         const tx = s === KITCHEN ? KITCHEN.x : FIELD.x + FIELD.w / 2;
         const ty = s === KITCHEN ? KITCHEN.y : FIELD.y + FIELD.h / 2;
         // Solo si el objetivo está dentro de su alcance
-        if (Math.hypot(tx - CATA.x, ty - CATA.y) <= CATA_RANGE) {
-          BOULDERS.push({ type: 'boulder', x0: CATA.x, y0: CATA.y, x: tx, y: ty, t: 0, dur: 1.1, struct: s });
-          CATA.cd = 12; CATA.fire = 0.25;
+        if (Math.hypot(tx - C.x, ty - C.y) <= CATA_RANGE) {
+          BOULDERS.push({ type: 'boulder', x0: C.x, y0: C.y, x: tx, y: ty, t: 0, dur: 1.1, struct: s });
+          C.cd = 12; C.fire = 0.25;
         }
       }
+    }
     }
     for (let i = BOULDERS.length - 1; i >= 0; i--) {
       const b = BOULDERS[i];
@@ -961,15 +972,33 @@
       BOULDERS.splice(i, 1);
     }
   }
+  // Torre de vigilancia: (x, y) es su base; la plataforma queda a TOWER_TOP_LIFT sobre el pie del arquero
   function drawTower(t) {
-    const { x, y } = t;
+    const { x, y } = t, H = t.h || 150;
     ctx.fillStyle = 'rgba(0,0,0,0.25)';
-    ctx.beginPath(); ctx.ellipse(x + 4, y + 6, 22, 8, 0, 0, TAU); ctx.fill();
-    ctx.fillStyle = '#7a5a3a'; ctx.fillRect(x - 16, y - 90, 32, 96);
+    ctx.beginPath(); ctx.ellipse(x + 4, y + 6, 26, 9, 0, 0, TAU); ctx.fill();
+    // patas de la torre
+    ctx.fillStyle = '#4a2f18'; ctx.fillRect(x - 18, y - 6, 5, 8); ctx.fillRect(x + 13, y - 6, 5, 8);
+    // escalera pegada a la cara lateral
+    ctx.fillStyle = '#6b4a2b'; ctx.fillRect(x + 16, y - H + 30, 4, H - 36);
+    for (let yy = y - H + 36; yy < y - 8; yy += 10) ctx.fillRect(x + 14, yy, 8, 2);
+    // cuerpo de troncos
+    ctx.fillStyle = '#7a5a3a'; ctx.fillRect(x - 16, y - H + 24, 32, H - 30);
     ctx.fillStyle = '#5b3d24';
-    for (let i = -16; i < 16; i += 8) ctx.fillRect(x + i, y - 96, 4, 8);
-    ctx.fillStyle = '#3f2a16'; ctx.fillRect(x - 6, y - 60, 12, 14);
-    ctx.fillStyle = '#ffd966'; ctx.fillRect(x - 3, y - 56, 6, 6);
+    for (let yy = y - H + 32; yy < y - 8; yy += 12) ctx.fillRect(x - 16, yy, 32, 2);
+    // ventana con luz de vigilancia
+    ctx.fillStyle = '#3f2a16'; ctx.fillRect(x - 6, y - H + 56, 12, 12);
+    ctx.fillStyle = '#ffd966'; ctx.fillRect(x - 3, y - H + 59, 6, 6);
+    // plataforma con barandilla
+    ctx.fillStyle = '#8a6238'; ctx.fillRect(x - 24, y - H + 20, 48, 6);
+    ctx.fillStyle = '#5b3d24';
+    for (let i = -22; i <= 22; i += 11) ctx.fillRect(x + i, y - H + 8, 3, 12);
+    ctx.fillRect(x - 24, y - H + 8, 48, 3);
+    // tejado a dos aguas
+    ctx.fillStyle = '#8c2a22';
+    ctx.beginPath(); ctx.moveTo(x - 28, y - H + 20); ctx.lineTo(x, y - H - 14); ctx.lineTo(x + 28, y - H + 20); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#a8382c';
+    ctx.beginPath(); ctx.moveTo(x, y - H - 14); ctx.lineTo(x + 28, y - H + 20); ctx.lineTo(x, y - H + 20); ctx.closePath(); ctx.fill();
   }
   function drawTent(t) {
     const { x, y } = t;
@@ -1858,7 +1887,7 @@
     const helmet = u.healer ? '#3f9e5a' : u.team === 'civ' ? '#d9b050' : isEnemy ? '#5a5f66' : '#9aa3ad';
     if (u.mounted && !u.dead) drawHorseAt(u.x, u.y, u.f, t, !!(u.vx || u.vy));
     ctx.save();
-    ctx.translate(u.x, u.y);
+    ctx.translate(u.x, u.y - (u.climb || 0));
 
     if (u.dead) {
       ctx.fillStyle = 'rgba(120,20,20,0.45)';
@@ -2176,7 +2205,7 @@
     items.push(STABLE);
     for (const s of SEATS) items.push(s);
     for (const d of DUMMIES) items.push(d);
-    items.push(...TENTS, CATA, CAMP_FIRE);
+    items.push(...TENTS, CATA, CATA2, CAMP_FIRE);
     items.push(FIELD, KITCHEN, HOUSE, TOWER);
     for (const b of BOULDERS) items.push(b);
     for (const p of PITS) items.push(p);
