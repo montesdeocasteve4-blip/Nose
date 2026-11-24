@@ -293,7 +293,7 @@
     a: a + Math.PI / 2, sy: FIRE.y + Math.sin(a) * 66 + 6
   }));
   // Muñecos de paja: puedes pegarles para entrenar
-  const DUMMIES = [[1180, 560], [1260, 560], [1220, 1000]].map(([x, y]) => ({
+  const DUMMIES = [[1250, 520], [1250, 600], [1250, 680]].map(([x, y]) => ({
     type: 'dummy', team: 'dummy', x, y, sy: y, hp: 100, dead: false, flash: 0, t: 0,
     f: 0, blocking: false, shield: false
   }));
@@ -607,13 +607,21 @@
     // oreja
     ctx.fillStyle = '#6a4220';
     ctx.beginPath(); ctx.moveTo(27, -51); ctx.lineTo(28.5, -58); ctx.lineTo(32, -52); ctx.closePath(); ctx.fill();
-    // crin a lo largo del cuello
-    ctx.strokeStyle = '#2b1a0c'; ctx.lineWidth = 2.4;
-    for (let i = 0; i < 5; i++) {
-      const bx = 9 + i * 3.4, by = -24 - i * 5.2;
+    // melena: mechones que caen hacia atrás por el cuello y ondean al galopar
+    for (let i = 0; i < 9; i++) {
+      const u = i / 8, mt = 1 - u;
+      const bx = mt * mt * 6 + 2 * mt * u * 14 + u * u * 25;
+      const by = mt * mt * -22 + 2 * mt * u * -36 + u * u * -50;
+      const wv = sw(i) * 2;
+      ctx.strokeStyle = i % 3 === 0 ? '#4a2c14' : '#2b1a0c';
+      ctx.lineWidth = 4.5 - u * 1.5;
       ctx.beginPath(); ctx.moveTo(bx, by);
-      ctx.quadraticCurveTo(bx - 3 + sw(i) * 1.5, by - 2, bx - 5 + sw(i) * 2, by - 4); ctx.stroke();
+      ctx.quadraticCurveTo(bx - 4 + wv, by + 1, bx - 9 + wv * 1.5, by + 3 + u * 2);
+      ctx.stroke();
     }
+    // mechón sobre la frente
+    ctx.fillStyle = '#2b1a0c';
+    ctx.beginPath(); ctx.moveTo(26, -51); ctx.quadraticCurveTo(30, -57, 35, -52); ctx.quadraticCurveTo(30, -50, 26, -47); ctx.closePath(); ctx.fill();
     // manta y silla si hay jinete
     if (horse.rider) {
       ctx.fillStyle = '#b8322b';
@@ -642,46 +650,65 @@
     ctx.save();
     ctx.translate(x, y);
     ctx.fillStyle = 'rgba(0,0,0,0.3)';
-    ctx.beginPath(); ctx.ellipse(0, 3, 14, 5, 0, 0, TAU); ctx.fill();
-    if (d.dead) {
-      // tirado en el suelo
-      ctx.fillStyle = '#d9b050';
-      ctx.beginPath(); ctx.ellipse(0, -4, 16, 7, 0.1, 0, TAU); ctx.fill();
-      ctx.fillStyle = '#c9a24a';
-      ctx.beginPath(); ctx.arc(-16, -5, 6, 0, TAU); ctx.fill();
-      ctx.restore();
-      return;
+    ctx.beginPath(); ctx.ellipse(0, 4, 18, 6, 0, 0, TAU); ctx.fill();
+    if (d.dead) ctx.rotate(1.45); // se cae al ser golpeado
+    // poste de madera clavado en el suelo y base de tablas
+    ctx.fillStyle = '#6b4a2b'; ctx.fillRect(-4, -52, 8, 56);
+    ctx.fillStyle = '#4a2f18'; ctx.fillRect(-14, 0, 28, 5);
+    ctx.fillStyle = '#5b3d24'; ctx.fillRect(-4, -52, 2, 56);
+    // travesaño de los brazos amarrado con cuerda
+    ctx.fillStyle = '#7a5230'; ctx.fillRect(-24, -36, 48, 6);
+    ctx.strokeStyle = '#c9b18a'; ctx.lineWidth = 1.2;
+    for (const cx of [-18, 18]) {
+      ctx.beginPath(); ctx.moveTo(cx - 2, -37); ctx.lineTo(cx + 2, -29); ctx.stroke();
     }
-    // poste y travesaño
-    ctx.fillStyle = '#6b4a2b'; ctx.fillRect(-3, -46, 6, 48);
-    ctx.fillStyle = '#7a5230'; ctx.fillRect(-18, -34, 36, 5);
-    // brazos de paja
-    ctx.strokeStyle = '#d9b050'; ctx.lineWidth = 4; ctx.lineCap = 'round';
-    ctx.beginPath(); ctx.moveTo(-16, -32); ctx.lineTo(-24, -20); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(16, -32); ctx.lineTo(24, -20); ctx.stroke();
-    // cuerpo de saco con paja que asoma
-    ctx.fillStyle = d.flash > 0 ? '#fff3c4' : '#d9b050';
-    ctx.beginPath(); ctx.ellipse(0, -24, 10, 13, 0, 0, TAU); ctx.fill();
-    ctx.strokeStyle = '#a57d25'; ctx.lineWidth = 1;
+    // brazos de paja atados
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = '#e0c070'; ctx.lineWidth = 6;
+    ctx.beginPath(); ctx.moveTo(-18, -33); ctx.lineTo(-28, -20); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(18, -33); ctx.lineTo(28, -20); ctx.stroke();
+    ctx.fillStyle = '#8a6a3a';
+    ctx.beginPath(); ctx.arc(-28, -20, 3, 0, TAU); ctx.fill();
+    ctx.beginPath(); ctx.arc(28, -20, 3, 0, TAU); ctx.fill();
+    // torso de yute con costuras y paja que asoma
+    ctx.fillStyle = d.flash > 0 ? '#f3e6c0' : '#c8a86a';
+    ctx.beginPath(); ctx.ellipse(0, -22, 12, 15, 0, 0, TAU); ctx.fill();
+    ctx.strokeStyle = '#a88a52'; ctx.lineWidth = 1;
     for (let i = -8; i <= 8; i += 4) {
-      ctx.beginPath(); ctx.moveTo(i, -36 + Math.abs(i) * 0.3); ctx.lineTo(i + 2, -28); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(i, -36); ctx.lineTo(i, -9); ctx.stroke();
     }
-    // diana en el pecho
-    ctx.fillStyle = '#b8322b';
-    ctx.beginPath(); ctx.arc(0, -24, 3.5, 0, TAU); ctx.fill();
-    ctx.fillStyle = '#f2ead8';
-    ctx.beginPath(); ctx.arc(0, -24, 1.4, 0, TAU); ctx.fill();
-    // cabeza: saco con cara
-    ctx.fillStyle = '#c9a24a';
-    ctx.beginPath(); ctx.arc(0, -46, 8, 0, TAU); ctx.fill();
-    ctx.fillStyle = '#3b2412';
-    ctx.fillRect(-3.5, -48, 2, 2); ctx.fillRect(1.5, -48, 2, 2);
-    ctx.strokeStyle = '#3b2412'; ctx.lineWidth = 1;
-    ctx.beginPath(); ctx.moveTo(-3, -42); ctx.lineTo(3, -42); ctx.stroke();
+    ctx.strokeStyle = '#e8c878'; ctx.lineWidth = 1.4;
+    for (let i = 0; i < 10; i++) {
+      const a = i / 10 * TAU, px = Math.cos(a) * 12, py = -22 + Math.sin(a) * 15;
+      ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(px + Math.cos(a) * 4, py + Math.sin(a) * 4); ctx.stroke();
+    }
+    // cinturón de cuerda trenzada
+    ctx.strokeStyle = '#8a6a3a'; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(-11, -13); ctx.lineTo(11, -13); ctx.stroke();
+    ctx.strokeStyle = '#5a4020'; ctx.lineWidth = 1;
+    for (let i = -10; i <= 10; i += 3) { ctx.beginPath(); ctx.moveTo(i, -14.5); ctx.lineTo(i + 1.5, -11.5); ctx.stroke(); }
+    // diana de tiro en el pecho
+    ctx.fillStyle = '#b8322b'; ctx.beginPath(); ctx.arc(0, -24, 6, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#f2ead8'; ctx.beginPath(); ctx.arc(0, -24, 4, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#b8322b'; ctx.beginPath(); ctx.arc(0, -24, 2, 0, TAU); ctx.fill();
+    // cabeza de saco con cara cosida
+    ctx.fillStyle = d.flash > 0 ? '#f3e6c0' : '#d2b57a';
+    ctx.beginPath(); ctx.ellipse(0, -44, 8.5, 9, 0, 0, TAU); ctx.fill();
+    ctx.strokeStyle = '#3b2412'; ctx.lineWidth = 1.4;
+    for (const ex of [-3.5, 3.5]) {
+      ctx.beginPath(); ctx.moveTo(ex - 1.6, -46.6); ctx.lineTo(ex + 1.6, -43.4);
+      ctx.moveTo(ex + 1.6, -46.6); ctx.lineTo(ex - 1.6, -43.4); ctx.stroke();
+    }
+    ctx.beginPath(); ctx.moveTo(-4, -39); ctx.lineTo(-2, -37.5); ctx.lineTo(0, -39); ctx.lineTo(2, -37.5); ctx.lineTo(4, -39); ctx.stroke();
+    // sombrero de paja gastado
+    ctx.fillStyle = '#e0c070';
+    ctx.beginPath(); ctx.ellipse(0, -51, 12, 3, 0, 0, TAU); ctx.fill();
+    ctx.fillRect(-6, -58, 12, 7);
+    ctx.fillStyle = '#8c2a22'; ctx.fillRect(-6, -53, 12, 2);
     ctx.restore();
-    if (d.hp < 100) {
-      ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(x - 15, y - 62, 30, 5);
-      ctx.fillStyle = '#e0c060'; ctx.fillRect(x - 15, y - 62, 30 * d.hp / 100, 5);
+    if (!d.dead && d.hp < 100) {
+      ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(x - 15, y - 66, 30, 5);
+      ctx.fillStyle = '#e0c060'; ctx.fillRect(x - 15, y - 66, 30 * d.hp / 100, 5);
     }
   }
 
@@ -704,6 +731,115 @@
       ctx.strokeStyle = '#3f2a16'; ctx.stroke();
     }
     ctx.restore();
+  }
+
+  // ---------- Campamento enemigo: tiendas, fogata y catapulta ----------
+  const TENTS = [
+    { type: 'tent', x: 3120, y: 1700, sy: 1722 },
+    { type: 'tent', x: 3212, y: 1690, sy: 1712 },
+    { type: 'tent', x: 3070, y: 1830, sy: 1852 }
+  ];
+  const CATA = { type: 'cata', x: 3180, y: 1960, sy: 1985, cd: 3, fire: 0 };
+  const CAMP_FIRE = { type: 'campfire', x: 3262, y: 2010, sy: 2020 };
+  const BOULDERS = [];
+  // La catapulta dispara a tu soldado más cercano en 700 px; la piedra cae con 30 de daño en 45 px
+  function updateCamp(dt) {
+    CATA.cd -= dt;
+    CATA.fire = Math.max(0, CATA.fire - dt);
+    if (CATA.cd <= 0) {
+      let best = null, bd = 700;
+      for (const p of units) {
+        if (p.team !== 'player' || p.dead) continue;
+        const d = Math.hypot(p.x - CATA.x, p.y - CATA.y);
+        if (d < bd) { bd = d; best = p; }
+      }
+      if (best) {
+        BOULDERS.push({ type: 'boulder', x0: CATA.x, y0: CATA.y, x: best.x, y: best.y, t: 0, dur: 1.1 });
+        CATA.cd = 5; CATA.fire = 0.25;
+      } else CATA.cd = 1;
+    }
+    for (let i = BOULDERS.length - 1; i >= 0; i--) {
+      const b = BOULDERS[i];
+      b.t += dt;
+      if (b.t < b.dur) continue;
+      for (const p of units) {
+        if (p.team !== 'player' || p.dead) continue;
+        if (Math.hypot(p.x - b.x, p.y - b.y) <= 45) {
+          p.hp -= 30; p.flash = 0.2;
+          addEffect(p.x, p.y - 50, '-30', '#ff6b6b');
+          if (p.hp <= 0) { p.hp = 0; p.dead = true; p.target = null; }
+        }
+      }
+      BOULDERS.splice(i, 1);
+    }
+  }
+  function drawTent(t) {
+    const { x, y } = t;
+    ctx.fillStyle = 'rgba(0,0,0,0.25)';
+    ctx.beginPath(); ctx.ellipse(x + 6, y + 10, 34, 10, 0, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#d8c9a0';
+    ctx.beginPath(); ctx.moveTo(x - 30, y + 10); ctx.lineTo(x, y - 34); ctx.lineTo(x + 30, y + 10); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#b5a47a';
+    ctx.beginPath(); ctx.moveTo(x, y - 34); ctx.lineTo(x + 30, y + 10); ctx.lineTo(x, y + 10); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#8c2a22';
+    ctx.fillRect(x - 30, y + 4, 60, 4);
+    ctx.fillStyle = '#4a3320';
+    ctx.beginPath(); ctx.moveTo(x - 8, y + 10); ctx.lineTo(x, y - 6); ctx.lineTo(x + 8, y + 10); ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = '#6b5a3a'; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(x, y - 34); ctx.lineTo(x, y - 42); ctx.stroke();
+    ctx.fillStyle = '#b8322b';
+    ctx.beginPath(); ctx.moveTo(x, y - 42); ctx.lineTo(x + 8, y - 39); ctx.lineTo(x, y - 36); ctx.closePath(); ctx.fill();
+  }
+  function drawCata(c) {
+    const ang = c.fire > 0 ? -1.0 + 1.6 * (1 - c.fire / 0.25) : -1.0;
+    ctx.save();
+    ctx.translate(c.x, c.y);
+    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+    ctx.beginPath(); ctx.ellipse(2, 12, 30, 9, 0, 0, TAU); ctx.fill();
+    for (const wx of [-20, 20]) {
+      ctx.fillStyle = '#3f2a16';
+      ctx.beginPath(); ctx.arc(wx, 10, 9, 0, TAU); ctx.fill();
+      ctx.strokeStyle = '#8a6238'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(wx, 10, 5, 0, TAU); ctx.stroke();
+    }
+    ctx.fillStyle = '#6b4a2b';
+    ctx.fillRect(-28, 0, 56, 8);
+    ctx.fillRect(-24, -12, 6, 16);
+    ctx.fillRect(18, -12, 6, 16);
+    // brazo de lanzamiento con cuchara
+    ctx.save();
+    ctx.translate(0, -2);
+    ctx.rotate(ang);
+    ctx.fillStyle = '#8a6238'; ctx.fillRect(-4, -3, 46, 6);
+    ctx.fillStyle = '#4a2f18';
+    ctx.beginPath(); ctx.ellipse(42, 0, 6, 4, 0, 0, TAU); ctx.fill();
+    ctx.restore();
+    ctx.restore();
+  }
+  function drawBoulder(b) {
+    const p = Math.min(1, b.t / b.dur);
+    const x = b.x0 + (b.x - b.x0) * p, y = b.y0 + (b.y - b.y0) * p;
+    const lift = Math.sin(p * Math.PI) * 70;
+    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+    ctx.beginPath(); ctx.ellipse(x, y + 2, 7, 3, 0, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#8a8a86';
+    ctx.beginPath(); ctx.arc(x, y - lift, 7, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#b5b3ad';
+    ctx.beginPath(); ctx.arc(x - 2, y - lift - 2, 2.5, 0, TAU); ctx.fill();
+  }
+  function drawCampFire(c, t) {
+    const { x, y } = c;
+    ctx.fillStyle = 'rgba(0,0,0,0.25)';
+    ctx.beginPath(); ctx.ellipse(x, y + 4, 16, 6, 0, 0, TAU); ctx.fill();
+    ctx.strokeStyle = '#5b3d24'; ctx.lineWidth = 4; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(x - 9, y + 2); ctx.lineTo(x + 9, y - 2); ctx.moveTo(x + 9, y + 2); ctx.lineTo(x - 9, y - 2); ctx.stroke();
+    const f1 = 1 + Math.sin(t * 10) * 0.12;
+    ctx.fillStyle = '#ff7a1c';
+    ctx.beginPath(); ctx.moveTo(x - 8, y - 1); ctx.quadraticCurveTo(x - 4, y - 20 * f1, x, y - 26 * f1);
+    ctx.quadraticCurveTo(x + 5, y - 18 * f1, x + 8, y - 1); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#ffd166';
+    ctx.beginPath(); ctx.moveTo(x - 4, y - 1); ctx.quadraticCurveTo(x - 2, y - 12, x, y - 14 * f1);
+    ctx.quadraticCurveTo(x + 2, y - 10, x + 4, y - 1); ctx.closePath(); ctx.fill();
   }
 
   function drawHay(x, y, s) {
@@ -798,6 +934,7 @@
     updateAlert(dt);
     updateHorse();
     updateDummies(dt);
+    updateCamp(dt);
     const mx = cam.x + (mouse.x - W / 2) / zoom;
     const my = cam.y + (mouse.y - H / 2) / zoom;
 
@@ -1444,6 +1581,8 @@
     items.push(STABLE);
     for (const s of SEATS) items.push(s);
     for (const d of DUMMIES) items.push(d);
+    items.push(...TENTS, CATA, CAMP_FIRE);
+    for (const b of BOULDERS) items.push(b);
     for (const p of PITS) items.push(p);
     if (!horse.rider) items.push(horse);
     items.sort((a, b) => (a.sy ?? a.y) - (b.sy ?? b.y));
@@ -1457,6 +1596,10 @@
       else if (it.type === 'pit') drawPit(it);
       else if (it.type === 'seat') drawSeat(it);
       else if (it.type === 'dummy') drawDummy(it);
+      else if (it.type === 'tent') drawTent(it);
+      else if (it.type === 'cata') drawCata(it);
+      else if (it.type === 'campfire') drawCampFire(it, t);
+      else if (it.type === 'boulder') drawBoulder(it);
       else if (it.type === 'horse') drawHorseAt(it.x, it.y, it.f, t, it.moving);
       else drawUnit(it, t);
     }
