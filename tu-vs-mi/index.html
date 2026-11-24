@@ -26,8 +26,24 @@
   #joy[hidden] { display: none; }
   #knob { position: absolute; left: 50%; top: 50%; width: 60px; height: 60px; margin: -30px 0 0 -30px; border-radius: 50%;
           background: rgba(255,255,255,.6); pointer-events: none; }
-  #rowtop { position: fixed; right: max(12px, env(safe-area-inset-right, 0px)); bottom: calc(max(16px, env(safe-area-inset-bottom, 0px)) + 120px);
-            display: grid; grid-template-columns: repeat(3, auto); gap: 8px; }
+  #ring { position: fixed; right: max(8px, env(safe-area-inset-right, 0px)); bottom: max(8px, env(safe-area-inset-bottom, 0px));
+          width: 210px; height: 210px; pointer-events: none; }
+  #ring button, #zoombtn { position: absolute; display: flex; align-items: center; justify-content: center; text-align: center;
+          pointer-events: auto; font: inherit; font-size: 11px; font-weight: 700; letter-spacing: .02em; line-height: 1.1;
+          color: #fff3dc; padding: 0; min-width: 0; min-height: 0; border-radius: 50%;
+          border: 2px solid rgba(255,190,90,.55);
+          background: radial-gradient(circle at 35% 30%, rgba(96,64,38,.95), rgba(26,18,10,.93));
+          box-shadow: 0 0 14px rgba(255,140,40,.22), 0 6px 14px rgba(0,0,0,.4);
+          touch-action: none; -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent; }
+  #ring button:active, #zoombtn:active { transform: scale(.93); }
+  #ring .b-atk { width: 96px; height: 96px; right: 57px; bottom: 57px; font-size: 16px;
+          background: radial-gradient(circle at 35% 30%, #ff9a4d, #b8381c); border-color: #ffd28a;
+          box-shadow: 0 0 22px rgba(255,130,40,.55), 0 6px 16px rgba(0,0,0,.45); }
+  #ring .b-def { width: 74px; height: 74px; right: 143px; bottom: 95px; border-color: rgba(150,200,255,.6); }
+  #ring .b-rack { width: 56px; height: 56px; right: 98px; bottom: 154px; font-size: 10px; }
+  #ring .b-squad { width: 60px; height: 60px; right: 24px; bottom: 137px; font-size: 10px; }
+  #zoombtn { position: fixed; top: calc(max(10px, env(safe-area-inset-top, 0px)) + 96px); right: max(10px, env(safe-area-inset-right, 0px));
+          width: 40px; height: 40px; font-size: 10px; }
   #rack { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(92vw, 360px); max-height: 80vh; overflow: auto;
           background: rgba(20,28,14,.95); color: #eef5e0; border: 1px solid rgba(255,255,255,.25); border-radius: 12px;
           padding: 12px; z-index: 5; box-shadow: 0 10px 30px rgba(0,0,0,.5); }
@@ -42,10 +58,6 @@
   .rk-n { grid-row: span 2; font-weight: 700; color: #ffd966; }
   .rk-name { font-weight: 600; }
   .rk-item small { grid-column: 2; opacity: .75; font-size: 12px; }
-  #rowbot { position: fixed; right: max(12px, env(safe-area-inset-right, 0px)); bottom: max(16px, env(safe-area-inset-bottom, 0px));
-            display: flex; gap: 10px; align-items: flex-end; }
-  #touch .big { width: 96px; height: 96px; border-radius: 50%; font-size: 16px; background: rgba(168,50,43,.85); }
-  #touch .side { width: 84px; height: 84px; border-radius: 50%; }
   body.touch #mini { top: max(10px, env(safe-area-inset-top, 0px)); }
 </style>
 <canvas id="c"></canvas>
@@ -54,17 +66,13 @@
 <div id="touch">
   <div id="joyzone"></div>
   <div id="joy" hidden><div id="knob"></div></div>
-  <div id="rowtop">
-    <button data-act="swap">Cambiar</button>
-    <button data-act="order-atk">Atacar todos</button>
-    <button data-act="order-def">Defender todos</button>
-    <button data-act="rack">Armas</button>
-    <button data-act="zoom">Zoom</button>
+  <div id="ring">
+    <button data-act="attack" class="b-atk">Atacar</button>
+    <button data-act="block" class="b-def">Defender</button>
+    <button data-act="rack" class="b-rack">Armas</button>
+    <button data-act="squad" class="b-squad">Esc.: ataque</button>
   </div>
-  <div id="rowbot">
-    <button data-act="block" class="side">Defender</button>
-    <button data-act="attack" class="big">Atacar</button>
-  </div>
+  <button data-act="zoom" id="zoombtn">Zoom</button>
 </div>
 <div id="rack" hidden></div>
 <div id="over"></div>
@@ -89,6 +97,8 @@
   // Fogata: cura a tu escuadra si está dentro del radio HEAL_R
   // Fogata en el centro del claro de la orilla izquierda; cura dentro del mismo círculo
   const FIRE = { type: 'fire', x: 260, y: WORLD_H / 2, r: 14 };
+  // Estante de armas físico, cerca de la fogata
+  const RACK_POS = { type: 'rack', x: 200, y: 1330, r: 30 };
   const HEAL_R = 260, HEAL_RATE = 10;
   const CLEARINGS = [
     { x: 260, y: WORLD_H / 2, r: 260 },
@@ -127,7 +137,7 @@
     }
   }
 
-  decor.push(FIRE);
+  decor.push(FIRE, RACK_POS);
 
   // ---------- Suelo pre-renderizado ----------
   const ground = document.createElement('canvas');
@@ -488,6 +498,37 @@
     }
   }
 
+  // ---------- Dibujo del estante de armas ----------
+  function drawRack(r) {
+    const { x, y } = r;
+    if (canUseRack()) {
+      ctx.strokeStyle = 'rgba(255,217,102,0.6)'; ctx.lineWidth = 2; ctx.setLineDash([4, 4]);
+      ctx.beginPath(); ctx.arc(x, y, 90, 0, TAU); ctx.stroke(); ctx.setLineDash([]);
+    }
+    ctx.fillStyle = 'rgba(0,0,0,0.25)';
+    ctx.beginPath(); ctx.ellipse(x, y + 3, 30, 9, 0, 0, TAU); ctx.fill();
+    // postes y travesaño
+    ctx.fillStyle = '#6b4a2b';
+    ctx.fillRect(x - 28, y - 52, 5, 52); ctx.fillRect(x + 23, y - 52, 5, 52);
+    ctx.fillStyle = '#8a6238';
+    ctx.fillRect(x - 30, y - 50, 60, 5);
+    // espada colgada
+    ctx.fillStyle = '#dfe6ee'; ctx.fillRect(x - 20, y - 44, 2.5, 30);
+    ctx.fillStyle = '#c9a227'; ctx.fillRect(x - 23, y - 15, 8, 3);
+    // hacha colgada
+    ctx.fillStyle = '#7a5230'; ctx.fillRect(x - 8, y - 44, 2, 30);
+    ctx.fillStyle = '#b9c2cc';
+    ctx.beginPath(); ctx.moveTo(x - 8, y - 44); ctx.lineTo(x - 1, y - 40); ctx.lineTo(x - 1, y - 30); ctx.lineTo(x - 8, y - 26); ctx.closePath(); ctx.fill();
+    // lanza apoyada
+    ctx.strokeStyle = '#7a5230'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(x + 6, y - 2); ctx.lineTo(x + 14, y - 50); ctx.stroke();
+    ctx.fillStyle = '#cfd6de';
+    ctx.beginPath(); ctx.moveTo(x + 12, y - 48); ctx.lineTo(x + 14, y - 58); ctx.lineTo(x + 17, y - 48); ctx.closePath(); ctx.fill();
+    // arco colgado
+    ctx.strokeStyle = '#7a5230'; ctx.lineWidth = 2.5; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(x + 15, y - 42); ctx.quadraticCurveTo(x + 22, y - 28, x + 15, y - 14); ctx.stroke();
+  }
+
   // ---------- Dibujo de la fogata ----------
   function drawFire(f, t) {
     const { x, y } = f;
@@ -717,7 +758,26 @@
   }
   function openRack() { buildRack(); rack.hidden = false; rackOpen = true; }
   function closeRack() { rack.hidden = true; rackOpen = false; }
-  function toggleRack() { if (rackOpen) closeRack(); else openRack(); }
+  // El estante es físico: solo se usa estando cerca de él
+  function canUseRack() {
+    return !!control && !control.dead && Math.hypot(control.x - RACK_POS.x, control.y - RACK_POS.y) <= 90;
+  }
+  function toggleRack() {
+    if (rackOpen) { closeRack(); return; }
+    if (!canUseRack()) {
+      if (control && !control.dead) addEffect(control.x, control.y - 60, 'Ve al estante', '#ffd966');
+      return;
+    }
+    openRack();
+  }
+
+  // Órdenes de escuadra con un solo botón
+  function squadAttacking() { return player.some(p => !p.dead && !p.ctrl && p.mode === 'attack'); }
+  function toggleSquad() { if (squadAttacking()) orderDefend(); else orderAttack(); setSquadLabel(); }
+  function setSquadLabel() {
+    const b = document.querySelector('#ring .b-squad');
+    if (b) b.textContent = squadAttacking() ? 'Esc.: ataque' : 'Esc.: defensa';
+  }
   rack.addEventListener('click', e => {
     const b = e.target.closest('button');
     if (!b) return;
@@ -726,7 +786,11 @@
   });
   // Cambiar de arma tarda 0.8 s (desenvainar)
   function equip(w) {
-    if (!control || control.dead || ended) return;
+    if (ended) return;
+    if (!canUseRack()) {
+      if (control && !control.dead) addEffect(control.x, control.y - 60, 'Ve al estante', '#ffd966');
+      return;
+    }
     const u = control;
     u.weapon = w; u.shield = WEAPONS[w].shield;
     u.swing = 0; u.hitDone = false; u.cd = 0.8;
@@ -782,9 +846,7 @@
       if (ended) return;
       if (act === 'attack') {
         if (control && !control.dead) doAttack(control);
-      } else if (act === 'order-atk') orderAttack();
-      else if (act === 'order-def') orderDefend();
-      else if (act === 'swap') cycleControl();
+      } else if (act === 'squad') toggleSquad();
       else if (act === 'rack') toggleRack();
       else if (act === 'zoom') { zoomIdx = (zoomIdx + 1) % ZOOMS.length; zoom = ZOOMS[zoomIdx]; clampCamera(); }
     });
@@ -819,6 +881,7 @@
       if (it.type === 'tree') drawTree(it);
       else if (it.type === 'bush') drawBush(it);
       else if (it.type === 'fire') drawFire(it, t);
+      else if (it.type === 'rack') drawRack(it);
       else drawUnit(it, t);
     }
 
@@ -835,6 +898,7 @@
   }
 
   function updateHud() {
+    setSquadLabel();
     const pa = player.filter(p => !p.dead).length;
     const ea = enemy.filter(e => !e.dead).length;
     hud.innerHTML =
@@ -871,6 +935,8 @@
 
   function renderMini() {
     mctx.drawImage(miniBg, 0, 0);
+    mctx.fillStyle = '#7a5230';
+    mctx.fillRect(RACK_POS.x * msx - 2, RACK_POS.y * msy - 2, 4, 4);
     mctx.fillStyle = '#ff9f1c';
     mctx.beginPath(); mctx.arc(FIRE.x * msx, FIRE.y * msy, 3, 0, TAU); mctx.fill();
     for (const u of units) {
