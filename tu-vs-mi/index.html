@@ -360,6 +360,12 @@
     { x: FMX - 40, y: FY1 - FORT_T - 50 }, { x: FMX + 40, y: FY1 - FORT_T - 50 },
     { x: FX1 - FORT_T - 50, y: FMY - 40 }, { x: FX1 - FORT_T - 50, y: FMY + 40 }
   ];
+  // Torre de vigilancia junto a la entrada principal (la del frente): su arquero ve a lo lejos y avisa
+  const TOWER = { type: 'tower', x: FX1 - 120, y: FMY - 170, sy: FMY - 150 };
+  const TOWER_HOLD = { x: FX1 - 90, y: FMY - 150 };
+  const TOWER_SIGHT = 700;
+  const GATE_POINT = { x: FX1 - 90, y: FMY };
+  let towerMode = 'none';
   let control = null, ended = null;
   const mouse = { x: 0, y: 0 };
   let rmb = false;
@@ -388,7 +394,9 @@
 
   function reset() {
     player = SPAWN_PLAYER.map((w, i) => makeUnit('player', w, 800, 1100 + (i - 3) * 110, 0, 'base'));
-    player.forEach((p, i) => { p.slot = i; p.healer = p.weapon === 'knife'; p.post = -1; });
+    player.forEach((p, i) => { p.slot = i; p.healer = p.weapon === 'knife'; p.post = -1; p.tower = false; p.towerRole = null; });
+    player[1].tower = true; // el arquero de la torre
+    towerMode = 'none';
     alert = { active: false, phase: 'idle', caller: null, t: 0 };
     horse = { type: 'horse', x: 575, y: 470, f: 0, moving: false, rider: null };
     enemyWave = false; enemyTimer = 0;
@@ -517,11 +525,44 @@
     }
     return best;
   }
-  function squadGroup() { return player.filter(p => !p.ctrl && !p.dead); }
+  function squadGroup() { return player.filter(p => !p.ctrl && !p.dead && !p.tower); }
+  // Torre: el arquero vigila desde su puesto; si ve enemigos avisa a la escuadra
+  function updateTower() {
+    const n = enemy.filter(e => !e.dead && Math.hypot(e.x - TOWER.x, e.y - TOWER.y) <= TOWER_SIGHT).length;
+    const mode = n === 0 ? 'none' : n === 1 ? 'one' : 'many';
+    if (mode === towerMode) return;
+    towerMode = mode;
+    for (const p of player) p.towerRole = null;
+    if (mode === 'none') return;
+    const squad = player.filter(p => !p.dead && !p.ctrl && !p.healer && !p.tower && !(p.meal && p.meal.state !== 'idle'));
+    squad.sort((a, b) => Math.hypot(a.x - GATE_POINT.x, a.y - GATE_POINT.y) - Math.hypot(b.x - GATE_POINT.x, b.y - GATE_POINT.y));
+    // Uno enemigo: dos defienden. Varios: todos menos uno, que se queda en la entrada
+    const defenders = mode === 'one' ? squad.slice(0, 2) : squad.slice(1);
+    for (const p of defenders) p.towerRole = 'defend';
+    addEffect(TOWER.x, TOWER.y - 60, mode === 'one' ? '¡Un enemigo!' : '¡Ataque!', '#ff6b6b');
+  }
+  function towerThink(u, dt) {
+    if (mealUpdate(u, dt)) return;
+    const e = nearestEnemy(u);
+    if (e) {
+      const d = Math.hypot(e.x - u.x, e.y - u.y);
+      u.f = Math.atan2(e.y - u.y, e.x - u.x);
+      if (d <= WEAPONS.bow.ranged.range && u.cd <= 0) fireArrow(u, 0.05);
+    }
+    const dx = TOWER_HOLD.x - u.x, dy = TOWER_HOLD.y - u.y, d = Math.hypot(dx, dy);
+    if (d > 10) { const sp = WEAPONS.bow.speed * 0.8; u.vx = dx / d * sp; u.vy = dy / d * sp; }
+  }
   // Puesto de guardia: en modo Base, tres vigilan las entradas; el resto rodea la fogata
   function homePos(u) {
     const s = u.slot || 0;
+    if (u.tower) return TOWER_HOLD;
     if (u.homeMode === 'base' && u.post >= 0) return GATE_GUARD[GUARD_IDX[u.post]];
+    // Sin puesto asignado: ocupa un puesto libre de la muralla en vez de quedarse junto a la fogata
+    if (u.homeMode === 'base') {
+      for (let post = 0; post < GUARD_IDX.length; post++) {
+        if (!player.some(p => p.post === post && !p.dead)) return GATE_GUARD[GUARD_IDX[post]];
+      }
+    }
     const ang = (s / SPAWN_PLAYER.length) * TAU + Math.PI / 4;
     return { x: FIRE.x + Math.cos(ang) * 120, y: FIRE.y + Math.sin(ang) * 120 };
   }
@@ -570,6 +611,14 @@
   }
   // Siempre se defienden si el enemigo está encima; si ven enemigos y están solos, llaman a la escuadra
   function guardThink(u, dt) {
+    if (u.towerRole === 'defend') {
+      // Aviso de la torre: va a la entrada y pelea a los que lleguen cerca
+      const te = nearestEnemy(u);
+      if (te && Math.hypot(te.x - u.x, te.y - u.y) < 260) { think(u, dt); return; }
+      const p = navPoint(u, GATE_POINT), dx = p.x - u.x, dy = p.y - u.y, d = Math.hypot(dx, dy) || 1;
+      if (d > 10) { const sp = WEAPONS[u.weapon].speed * 0.9; u.vx = dx / d * sp; u.vy = dy / d * sp; }
+      return;
+    }
     const e = nearestEnemy(u);
     const de = e ? Math.hypot(e.x - u.x, e.y - u.y) : Infinity;
     if (de < 110) { think(u, dt); return; }
@@ -908,6 +957,16 @@
       BOULDERS.splice(i, 1);
     }
   }
+  function drawTower(t) {
+    const { x, y } = t;
+    ctx.fillStyle = 'rgba(0,0,0,0.25)';
+    ctx.beginPath(); ctx.ellipse(x + 4, y + 6, 22, 8, 0, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#7a5a3a'; ctx.fillRect(x - 16, y - 90, 32, 96);
+    ctx.fillStyle = '#5b3d24';
+    for (let i = -16; i < 16; i += 8) ctx.fillRect(x + i, y - 96, 4, 8);
+    ctx.fillStyle = '#3f2a16'; ctx.fillRect(x - 6, y - 60, 12, 14);
+    ctx.fillStyle = '#ffd966'; ctx.fillRect(x - 3, y - 56, 6, 6);
+  }
   function drawTent(t) {
     const { x, y } = t;
     ctx.fillStyle = 'rgba(0,0,0,0.25)';
@@ -1011,7 +1070,7 @@
     for (const p of player) {
       if (p.post >= 0 && (p.dead || p.ctrl || p.healer || p.homeMode !== 'base')) p.post = -1;
     }
-    const alive = player.filter(p => !p.dead && !p.ctrl && !p.healer);
+    const alive = player.filter(p => !p.dead && !p.ctrl && !p.healer && !p.tower);
     if (alive.length < 3) return;
     for (let post = 0; post < GUARD_IDX.length; post++) {
       if (player.some(p => p.post === post && !p.dead)) continue;
@@ -1335,6 +1394,7 @@
 
   function updateUnits(dt) {
     updateAlert(dt);
+    updateTower();
     assignPosts();
     updateHorse();
     updateDummies(dt);
@@ -1384,6 +1444,7 @@
       } else {
         u.blocking = u.blockT > 0;
         if (u.healer) healerThink(u, dt);
+        else if (u.tower) towerThink(u, dt);
         else if (u.team === 'player' && u.mode !== 'attack') { if (!mealUpdate(u, dt)) guardThink(u, dt); }
         else if (u.team === 'enemy') enemyThink(u, dt);
         else if (u.team === 'civ') farmThink(u, dt);
@@ -2112,7 +2173,7 @@
     for (const s of SEATS) items.push(s);
     for (const d of DUMMIES) items.push(d);
     items.push(...TENTS, CATA, CAMP_FIRE);
-    items.push(FIELD, KITCHEN, HOUSE);
+    items.push(FIELD, KITCHEN, HOUSE, TOWER);
     for (const b of BOULDERS) items.push(b);
     for (const p of PITS) items.push(p);
     if (!horse.rider) items.push(horse);
@@ -2128,6 +2189,7 @@
       else if (it.type === 'seat') drawSeat(it);
       else if (it.type === 'dummy') drawDummy(it);
       else if (it.type === 'tent') drawTent(it);
+      else if (it.type === 'tower') drawTower(it);
       else if (it.type === 'cata') drawCata(it);
       else if (it.type === 'campfire') drawCampFire(it, t);
       else if (it.type === 'boulder') drawBoulder(it);
