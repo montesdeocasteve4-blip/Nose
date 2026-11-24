@@ -1,0 +1,333 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Bosque - Tu vs Mi</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #1d2b14; overflow: hidden; font-family: system-ui, sans-serif; }
+  canvas { display: block; width: 100%; height: 100%; cursor: grab; touch-action: none; }
+  canvas.drag { cursor: grabbing; }
+  #hud { position: fixed; left: 12px; top: 10px; color: #eef5e0; background: rgba(0,0,0,.35);
+         padding: 6px 10px; border-radius: 6px; font-size: 13px; pointer-events: none; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="hud">Soldados: 5 · WASD / flechas: mover cámara · arrastra con el mouse · rueda: zoom</div>
+<script>
+(() => {
+  const WORLD_W = 3200, WORLD_H = 2200;
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d');
+  let W = 0, H = 0, dpr = 1;
+
+  // ---------- Aleatorio determinista (el bosque es igual en cada carga) ----------
+  let seed = 20240607;
+  const rand = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
+  const R = (a, b) => a + (b - a) * rand();
+
+  // ---------- Claro central donde se forman los soldados ----------
+  const CX = WORLD_W / 2, CY = WORLD_H / 2, CLEAR_R = 330;
+
+  // ---------- Decoración: árboles y arbustos ----------
+  const trees = [], bushes = [];
+  const decor = [];
+
+  function isFree(x, y, r, gap) {
+    if (Math.hypot(x - CX, y - CY) < CLEAR_R + r + 20) return false;
+    for (const d of decor) {
+      if (Math.hypot(x - d.x, y - d.y) < d.r + r + gap) return false;
+    }
+    return true;
+  }
+
+  // Árboles (más juntos)
+  for (let i = 0, tries = 0; trees.length < 650 && tries < 6000; tries++) {
+    const x = R(70, WORLD_W - 70), y = R(70, WORLD_H - 70), r = R(20, 32);
+    if (isFree(x, y, r, 12)) {
+      const t = { type: 'tree', x, y, r, v: Math.floor(rand() * 3) };
+      trees.push(t); decor.push(t);
+    }
+  }
+  // Arbustos (llenan huecos)
+  for (let tries = 0; bushes.length < 420 && tries < 6000; tries++) {
+    const x = R(60, WORLD_W - 60), y = R(60, WORLD_H - 60), r = R(13, 24);
+    if (isFree(x, y, r, 2)) {
+      const b = { type: 'bush', x, y, r, v: Math.floor(rand() * 3), berries: rand() < 0.3 };
+      bushes.push(b); decor.push(b);
+    }
+  }
+
+  // ---------- Soldados: 5 en fila, solo con espada ----------
+  const soldiers = [];
+  for (let i = 0; i < 5; i++) {
+    soldiers.push({ type: 'soldier', x: CX - 240 + i * 120, y: CY, phase: i * 1.3, id: i + 1 });
+  }
+
+  // ---------- Suelo pre-renderizado (una sola vez) ----------
+  const ground = document.createElement('canvas');
+  ground.width = WORLD_W; ground.height = WORLD_H;
+  (function buildGround() {
+    const g = ground.getContext('2d');
+    g.fillStyle = '#43702c';
+    g.fillRect(0, 0, WORLD_W, WORLD_H);
+
+    // manchas de tono
+    const patch = ['#3a6626', '#4b7a33', '#37601f', '#557f38'];
+    for (let i = 0; i < 420; i++) {
+      g.globalAlpha = 0.3;
+      g.fillStyle = patch[Math.floor(rand() * patch.length)];
+      g.beginPath();
+      g.arc(R(0, WORLD_W), R(0, WORLD_H), R(40, 150), 0, Math.PI * 2);
+      g.fill();
+    }
+    // briznas de hierba
+    g.globalAlpha = 0.6;
+    g.strokeStyle = '#2c5219';
+    g.lineWidth = 1.2;
+    for (let i = 0; i < 6000; i++) {
+      const x = R(0, WORLD_W), y = R(0, WORLD_H), l = R(4, 8), a = R(-0.4, 0.4) - Math.PI / 2;
+      g.beginPath();
+      g.moveTo(x, y);
+      g.lineTo(x + Math.cos(a) * l, y + Math.sin(a) * l);
+      g.stroke();
+    }
+    // hojas caídas
+    for (let i = 0; i < 900; i++) {
+      g.globalAlpha = 0.55;
+      g.fillStyle = rand() < 0.5 ? '#8a5a22' : '#a0702a';
+      g.beginPath();
+      g.ellipse(R(0, WORLD_W), R(0, WORLD_H), R(1.5, 3), R(1, 2), R(0, 3), 0, Math.PI * 2);
+      g.fill();
+    }
+    // claro de tierra
+    g.globalAlpha = 0.85;
+    g.fillStyle = '#8a7a4c';
+    g.beginPath(); g.arc(CX, CY, CLEAR_R, 0, Math.PI * 2); g.fill();
+    g.globalAlpha = 0.35;
+    g.fillStyle = '#6e5f36';
+    for (let i = 0; i < 140; i++) {
+      const a = R(0, Math.PI * 2), d = Math.sqrt(rand()) * CLEAR_R * 0.95;
+      g.beginPath(); g.arc(CX + Math.cos(a) * d, CY + Math.sin(a) * d, R(6, 22), 0, Math.PI * 2); g.fill();
+    }
+    g.globalAlpha = 0.8;
+    g.fillStyle = '#9d9274';
+    for (let i = 0; i < 60; i++) {
+      const a = R(0, Math.PI * 2), d = Math.sqrt(rand()) * CLEAR_R * 0.9;
+      g.beginPath(); g.ellipse(CX + Math.cos(a) * d, CY + Math.sin(a) * d, R(1.5, 3), R(1, 2), 0, 0, Math.PI * 2); g.fill();
+    }
+    g.globalAlpha = 1;
+  })();
+
+  // ---------- Dibujo de objetos ----------
+  function drawTree(t) {
+    const { x, y, r, v } = t;
+    ctx.fillStyle = 'rgba(0,0,0,0.22)';
+    ctx.beginPath(); ctx.ellipse(x + r * 0.35, y + 2, r * 1.1, r * 0.45, 0, 0, Math.PI * 2); ctx.fill();
+
+    ctx.fillStyle = '#5b3d24';
+    ctx.fillRect(x - r * 0.18, y - r * 0.9, r * 0.36, r * 0.95);
+
+    const cy = y - r * 1.5;
+    const cols = ['#1f4d1c', '#27601f', '#2e7024'];
+    const blobs = [[0, 0, 1], [-0.55, 0.25, 0.7], [0.55, 0.2, 0.7], [0, -0.5, 0.75], [-0.3, -0.2, 0.85]];
+    blobs.forEach(([bx, by, br], i) => {
+      ctx.fillStyle = cols[(i + v) % 3];
+      ctx.beginPath(); ctx.arc(x + bx * r, cy + by * r, br * r, 0, Math.PI * 2); ctx.fill();
+    });
+    ctx.fillStyle = 'rgba(255,255,255,0.10)';
+    ctx.beginPath(); ctx.arc(x - r * 0.3, cy - r * 0.5, r * 0.35, 0, Math.PI * 2); ctx.fill();
+  }
+
+  function drawBush(b) {
+    const { x, y, r, v } = b;
+    ctx.fillStyle = 'rgba(0,0,0,0.2)';
+    ctx.beginPath(); ctx.ellipse(x, y + r * 0.3, r * 1.1, r * 0.4, 0, 0, Math.PI * 2); ctx.fill();
+
+    const cols = ['#3f8a33', '#4a9a3a', '#367c2c'];
+    const blobs = [[-0.5, 0, 0.6], [0.5, 0, 0.6], [0, -0.35, 0.75], [-0.2, 0.15, 0.7], [0.25, 0.1, 0.65]];
+    blobs.forEach(([bx, by, br], i) => {
+      ctx.fillStyle = cols[(i + v) % 3];
+      ctx.beginPath(); ctx.arc(x + bx * r, y - r * 0.5 + by * r, br * r, 0, Math.PI * 2); ctx.fill();
+    });
+    if (b.berries) {
+      ctx.fillStyle = '#b8283a';
+      for (let i = 0; i < 4; i++) {
+        ctx.beginPath(); ctx.arc(x + Math.cos(i * 1.6) * r * 0.5, y - r * 0.6 + Math.sin(i * 2.1) * r * 0.4, 1.6, 0, Math.PI * 2); ctx.fill();
+      }
+    }
+  }
+
+  function roundedSoldierParts(s, t) {
+    const bob = Math.sin(t * 2.2 + s.phase) * 0.6;
+    ctx.save();
+    ctx.translate(s.x, s.y);
+    ctx.scale(1.3, 1.3);
+
+    // sombra
+    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+    ctx.beginPath(); ctx.ellipse(0, 1, 11, 4.5, 0, 0, Math.PI * 2); ctx.fill();
+
+    // piernas
+    ctx.fillStyle = '#4a3a2a';
+    ctx.fillRect(-5, -14, 4.5, 14);
+    ctx.fillRect(0.5, -14, 4.5, 14);
+
+    // brazo trasero
+    ctx.strokeStyle = '#a8322b';
+    ctx.lineWidth = 4;
+    ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(-4, -30 + bob); ctx.lineTo(-6, -20 + bob); ctx.stroke();
+
+    // torso (túnica roja)
+    ctx.fillStyle = '#a8322b';
+    ctx.fillRect(-7, -33 + bob, 14, 20);
+    ctx.fillStyle = '#3b2817';
+    ctx.fillRect(-7, -18 + bob, 14, 2.5);
+
+    // cabeza
+    ctx.fillStyle = '#e0b48a';
+    ctx.beginPath(); ctx.arc(0, -38 + bob, 5.5, 0, Math.PI * 2); ctx.fill();
+
+    // casco
+    ctx.fillStyle = '#8f98a3';
+    ctx.beginPath(); ctx.arc(0, -40 + bob, 6.2, Math.PI, 0); ctx.fill();
+    ctx.fillRect(-6.2, -40 + bob, 12.4, 2);
+    ctx.fillStyle = '#c0392b';
+    ctx.fillRect(-0.8, -47 + bob, 1.6, 4);
+
+    // brazo de la espada
+    const sx = 5, sy = -30 + bob, hx = 10, hy = -22 + bob;
+    ctx.strokeStyle = '#a8322b';
+    ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(hx, hy); ctx.stroke();
+
+    // espada
+    ctx.save();
+    ctx.translate(hx, hy);
+    ctx.rotate(-1.1);
+    ctx.fillStyle = '#5b3d24';           // empuñadura
+    ctx.fillRect(-6, -1, 6, 2);
+    ctx.fillStyle = '#c9a227';           // guarda
+    ctx.fillRect(-0.5, -4, 2, 8);
+    ctx.fillStyle = '#dfe6ee';           // hoja
+    ctx.beginPath();
+    ctx.moveTo(1.5, -1.6); ctx.lineTo(24, -1.2); ctx.lineTo(28, 0); ctx.lineTo(24, 1.2); ctx.lineTo(1.5, 1.6);
+    ctx.closePath(); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.8)';
+    ctx.fillRect(2, -0.4, 22, 0.6);
+    ctx.restore();
+
+    // mano
+    ctx.fillStyle = '#e0b48a';
+    ctx.beginPath(); ctx.arc(hx, hy, 2, 0, Math.PI * 2); ctx.fill();
+
+    ctx.restore();
+  }
+
+  // ---------- Cámara ----------
+  const cam = { x: CX, y: CY };
+  let zoom = 1;
+  const keys = new Set();
+
+  function clampCamera() {
+    const hw = Math.min(W / 2 / zoom, WORLD_W / 2);
+    const hh = Math.min(H / 2 / zoom, WORLD_H / 2);
+    cam.x = Math.min(Math.max(cam.x, hw), WORLD_W - hw);
+    cam.y = Math.min(Math.max(cam.y, hh), WORLD_H - hh);
+  }
+
+  function resize() {
+    dpr = window.devicePixelRatio || 1;
+    W = window.innerWidth; H = window.innerHeight;
+    canvas.width = Math.floor(W * dpr);
+    canvas.height = Math.floor(H * dpr);
+    clampCamera();
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  window.addEventListener('keydown', e => {
+    if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight',' '].includes(e.key)) e.preventDefault();
+    keys.add(e.key.toLowerCase());
+  });
+  window.addEventListener('keyup', e => keys.delete(e.key.toLowerCase()));
+
+  let dragging = false, lastX = 0, lastY = 0;
+  canvas.addEventListener('pointerdown', e => {
+    dragging = true; lastX = e.clientX; lastY = e.clientY;
+    canvas.classList.add('drag');
+    canvas.setPointerCapture(e.pointerId);
+  });
+  canvas.addEventListener('pointermove', e => {
+    if (!dragging) return;
+    cam.x -= (e.clientX - lastX) / zoom;
+    cam.y -= (e.clientY - lastY) / zoom;
+    lastX = e.clientX; lastY = e.clientY;
+    clampCamera();
+  });
+  const endDrag = () => { dragging = false; canvas.classList.remove('drag'); };
+  canvas.addEventListener('pointerup', endDrag);
+  canvas.addEventListener('pointercancel', endDrag);
+  canvas.addEventListener('wheel', e => {
+    e.preventDefault();
+    zoom = Math.min(2, Math.max(0.5, zoom * (e.deltaY > 0 ? 0.9 : 1.1)));
+    clampCamera();
+  }, { passive: false });
+
+  // ---------- Bucle principal ----------
+  function update(dt) {
+    const speed = 600 * dt / zoom;
+    let dx = 0, dy = 0;
+    if (keys.has('a') || keys.has('arrowleft')) dx -= 1;
+    if (keys.has('d') || keys.has('arrowright')) dx += 1;
+    if (keys.has('w') || keys.has('arrowup')) dy -= 1;
+    if (keys.has('s') || keys.has('arrowdown')) dy += 1;
+    if (dx || dy) {
+      const len = Math.hypot(dx, dy);
+      cam.x += dx / len * speed;
+      cam.y += dy / len * speed;
+      clampCamera();
+    }
+  }
+
+  function render(t) {
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.fillStyle = '#1d2b14';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    ctx.setTransform(dpr * zoom, 0, 0, dpr * zoom,
+                     dpr * (W / 2 - cam.x * zoom), dpr * (H / 2 - cam.y * zoom));
+    ctx.drawImage(ground, 0, 0);
+
+    // Objetos visibles, ordenados por profundidad (y)
+    const m = 80 / zoom;
+    const left = cam.x - W / 2 / zoom - m, right = cam.x + W / 2 / zoom + m;
+    const top = cam.y - H / 2 / zoom - m, bottom = cam.y + H / 2 / zoom + m;
+    const items = [];
+    for (const d of decor) {
+      if (d.x >= left && d.x <= right && d.y >= top && d.y <= bottom) items.push(d);
+    }
+    for (const s of soldiers) items.push(s);
+    items.sort((a, b) => a.y - b.y);
+
+    for (const it of items) {
+      if (it.type === 'tree') drawTree(it);
+      else if (it.type === 'bush') drawBush(it);
+      else roundedSoldierParts(it, t);
+    }
+  }
+
+  let last = performance.now();
+  function frame(now) {
+    const dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    update(dt);
+    render(now / 1000);
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
