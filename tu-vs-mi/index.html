@@ -69,12 +69,12 @@
 
   // ---------- Claros de spawn: orilla izquierda y esquina opuesta ----------
   // Fogata: cura a tu escuadra si está dentro del radio HEAL_R
-  const FIRE = { type: 'fire', x: 600, y: WORLD_H / 2, r: 14 };
-  const HEAL_R = 200, HEAL_RATE = 10;
+  // Fogata en el centro del claro de la orilla izquierda; cura dentro del mismo círculo
+  const FIRE = { type: 'fire', x: 260, y: WORLD_H / 2, r: 14 };
+  const HEAL_R = 260, HEAL_RATE = 10;
   const CLEARINGS = [
     { x: 260, y: WORLD_H / 2, r: 260 },
-    { x: WORLD_W - 300, y: WORLD_H - 300, r: 260 },
-    { x: FIRE.x, y: FIRE.y, r: 120 }
+    { x: WORLD_W - 300, y: WORLD_H - 300, r: 260 }
   ];
   const inClearing = (x, y, pad) => CLEARINGS.some(c => Math.hypot(x - c.x, y - c.y) < c.r + pad);
 
@@ -84,7 +84,10 @@
     sword:      { name: 'Espada',    reach: 44, dmg: 20, cd: 0.8, swing: 0.35, speed: 112, shield: true,  a0: -1.1 },
     spear:      { name: 'Lanza',     reach: 70, dmg: 16, cd: 1.0, swing: 0.45, speed: 100, shield: false, a0: -0.1 },
     axe:        { name: 'Hacha',     reach: 40, dmg: 24, cd: 1.1, swing: 0.5,  speed: 102, shield: true,  a0: -1.0 },
-    greatsword: { name: 'Espadón',   reach: 52, dmg: 30, cd: 1.4, swing: 0.55, speed: 90,  shield: false, a0: -1.0 }
+    greatsword: { name: 'Espadón',   reach: 52, dmg: 30, cd: 1.4, swing: 0.55, speed: 90,  shield: false, a0: -1.0 },
+    // Arco: dispara a distancia; reach/dmg son la espada corta de respaldo
+    bow:        { name: 'Arco',      reach: 40, dmg: 12, cd: 1.2, swing: 0.35, speed: 100, shield: false, a0: 0,
+                  ranged: { range: 380, speed: 520, dmg: 22 } }
   };
 
   // ---------- Decoración del bosque ----------
@@ -180,11 +183,11 @@
   }
 
   // ---------- Unidades ----------
-  const SPAWN_PLAYER = ['sword', 'sword', 'spear', 'axe', 'greatsword'];
+  const SPAWN_PLAYER = ['sword', 'bow', 'spear', 'axe', 'greatsword'];
   const SPAWN_ENEMY  = ['sword', 'spear', 'axe', 'sword', 'greatsword'];
   const ENEMY_POS = [[2870, 1830], [2930, 1885], [2870, 1940], [2930, 1995], [2870, 2050]];
 
-  let units = [], player = [], enemy = [], effects = [];
+  let units = [], player = [], enemy = [], effects = [], arrows = [];
   let control = null, ended = null;
   const mouse = { x: 0, y: 0 };
   let rmb = false;
@@ -216,6 +219,7 @@
     enemy = SPAWN_ENEMY.map((w, i) => makeUnit('enemy', w, ENEMY_POS[i][0], ENEMY_POS[i][1], Math.PI, 'attack'));
     units = [...player, ...enemy];
     effects = [];
+    arrows = [];
     ended = null;
     over.style.display = 'none';
     setControl(player[0]);
@@ -293,6 +297,14 @@
     const w = WEAPONS[u.weapon];
     const dx = t.x - u.x, dy = t.y - u.y, d = Math.hypot(dx, dy);
     if (u.swing <= 0) u.f = Math.atan2(dy, dx);
+    if (u.weapon === 'bow') {
+      // El arquero mantiene distancia y dispara; si el enemigo está pegado, usa su espada corta
+      if (d < 40) { if (u.cd <= 0 && u.swing <= 0) startSwing(u); }
+      else if (d < 90) { u.vx = -dx / d * w.speed * 0.7; u.vy = -dy / d * w.speed * 0.7; }
+      else if (d <= WEAPONS.bow.ranged.range) { if (u.cd <= 0 && u.swing <= 0) fireArrow(u, 0.05); }
+      else { u.vx = dx / d * w.speed * 0.8; u.vy = dy / d * w.speed * 0.8; }
+      return;
+    }
     if (d > w.reach * 0.85) {
       u.vx = dx / d * w.speed * 0.8; u.vy = dy / d * w.speed * 0.8;
     } else if (u.cd <= 0 && u.swing <= 0) {
@@ -311,6 +323,7 @@
     for (const u of units) {
       if (u.dead) continue;
       u.cd = Math.max(0, u.cd - dt);
+      u.fireT = Math.max(0, (u.fireT || 0) - dt);
       u.flash = Math.max(0, u.flash - dt);
       u.blockT = Math.max(0, u.blockT - dt);
 
@@ -365,6 +378,73 @@
           b.x += nx * push; b.y += ny * push;
         }
       }
+    }
+  }
+
+  // ---------- Ataque, arco y flechas ----------
+  function nearestEnemyDist(u) {
+    let best = Infinity;
+    for (const e of units) if (e.team !== u.team && !e.dead) best = Math.min(best, Math.hypot(e.x - u.x, e.y - u.y));
+    return best;
+  }
+
+  function fireArrow(u, spread) {
+    const R = WEAPONS.bow.ranged;
+    u.cd = WEAPONS.bow.cd;
+    u.fireT = 0.25;
+    const a = u.f + (rand() * 2 - 1) * spread;
+    arrows.push({ x: u.x, y: u.y, sx: u.x, sy: u.y, vx: Math.cos(a) * R.speed, vy: Math.sin(a) * R.speed,
+                  team: u.team, range: R.range, dmg: R.dmg });
+  }
+
+  // Ataque manual o de la IA: el arco dispara, o usa la espada corta si el enemigo está pegado
+  function doAttack(u) {
+    if (u.cd > 0 || u.swing > 0) return;
+    if (u.weapon === 'bow') {
+      if (nearestEnemyDist(u) <= 40) startSwing(u);
+      else fireArrow(u, 0.02);
+      return;
+    }
+    startSwing(u);
+  }
+
+  function applyArrowHit(a, e) {
+    const toShooter = Math.atan2(a.sy - e.y, a.sx - e.x);
+    const facing = Math.abs(angDiff(toShooter, e.f)) < 1.6;
+    let dmg = a.dmg;
+    if (e.blocking && facing) {
+      dmg = a.dmg * (e.shield ? 0.4 : 0.7);
+      addEffect(e.x, e.y - 50, (e.shield ? 'ESCUDO -' : 'PARADA -') + Math.round(dmg), '#7fd3ff');
+    } else {
+      addEffect(e.x, e.y - 50, '-' + Math.round(dmg), '#ff6b6b');
+    }
+    e.hp -= dmg;
+    e.flash = 0.2;
+    if (e.hp <= 0) { e.hp = 0; e.dead = true; e.blocking = false; e.target = null; }
+  }
+
+  function updateArrows(dt) {
+    for (let i = arrows.length - 1; i >= 0; i--) {
+      const a = arrows[i];
+      a.x += a.vx * dt; a.y += a.vy * dt;
+      let hit = false;
+      for (const e of units) {
+        if (e.team === a.team || e.dead) continue;
+        if (Math.hypot(e.x - a.x, e.y - a.y) <= 14) { applyArrowHit(a, e); hit = true; break; }
+      }
+      const far = Math.hypot(a.x - a.sx, a.y - a.sy) > a.range;
+      if (hit || far || a.x < 0 || a.y < 0 || a.x > WORLD_W || a.y > WORLD_H) arrows.splice(i, 1);
+    }
+  }
+
+  function drawArrows() {
+    ctx.lineWidth = 1.6;
+    for (const a of arrows) {
+      const ang = Math.atan2(a.vy, a.vx);
+      ctx.strokeStyle = '#d8d2c0';
+      ctx.beginPath(); ctx.moveTo(a.x - Math.cos(ang) * 12, a.y - Math.sin(ang) * 12); ctx.lineTo(a.x, a.y); ctx.stroke();
+      ctx.fillStyle = '#9aa3ad';
+      ctx.beginPath(); ctx.arc(a.x, a.y, 1.8, 0, TAU); ctx.fill();
     }
   }
 
@@ -433,7 +513,9 @@
     ctx.save();
     ctx.translate(10, -22 + bob);
     ctx.rotate(a);
-    if (u.weapon === 'sword') {
+    // Con el arco en reposo se ve el arco; mientras golpea, la espada corta
+    const kind = (u.weapon === 'bow' && u.swing > 0) ? 'sword' : u.weapon;
+    if (kind === 'sword') {
       ctx.fillStyle = '#5b3d24'; ctx.fillRect(-6, -1, 6, 2);
       ctx.fillStyle = '#c9a227'; ctx.fillRect(0, -4, 2, 8);
       ctx.fillStyle = '#dfe6ee';
@@ -447,6 +529,12 @@
       ctx.fillStyle = '#7a5230'; ctx.fillRect(-14, -1, 74 + ext, 2);
       ctx.fillStyle = '#cfd6de';
       ctx.beginPath(); ctx.moveTo(60 + ext, -3); ctx.lineTo(72 + ext, 0); ctx.lineTo(60 + ext, 3); ctx.fill();
+    } else if (kind === 'bow') {
+      const pull = u.fireT > 0 ? -2 : 3;
+      ctx.strokeStyle = '#7a5230'; ctx.lineWidth = 2.5; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(3, -11); ctx.quadraticCurveTo(9, 0, 3, 11); ctx.stroke();
+      ctx.strokeStyle = '#e8e0c8'; ctx.lineWidth = 0.8;
+      ctx.beginPath(); ctx.moveTo(3, -11); ctx.lineTo(pull, 0); ctx.lineTo(3, 11); ctx.stroke();
     } else if (u.weapon === 'axe') {
       ctx.fillStyle = '#7a5230'; ctx.fillRect(-10, -1.2, 30, 2.4);
       ctx.fillStyle = '#b9c2cc';
@@ -575,8 +663,8 @@
     if (e.pointerType === 'touch') return; // en teléfono se ataca con el botón Atacar
     touchMode = false;
     mouse.x = e.clientX; mouse.y = e.clientY;
-    if (e.button === 0 && !ended && control && !control.dead && control.cd <= 0 && control.swing <= 0) {
-      startSwing(control);
+    if (e.button === 0 && !ended && control && !control.dead) {
+      doAttack(control);
     } else if (e.button === 2) {
       rmb = true;
     }
@@ -630,7 +718,7 @@
       if (act === 'block') { touchBlock = true; return; }
       if (ended) return;
       if (act === 'attack') {
-        if (control && !control.dead && control.cd <= 0 && control.swing <= 0) startSwing(control);
+        if (control && !control.dead) doAttack(control);
       } else if (act === 'order-atk') orderAttack();
       else if (act === 'order-def') orderDefend();
       else if (act === 'swap') cycleControl();
@@ -669,6 +757,8 @@
       else if (it.type === 'fire') drawFire(it, t);
       else drawUnit(it, t);
     }
+
+    drawArrows();
 
     ctx.font = 'bold 13px system-ui, sans-serif';
     ctx.textAlign = 'center';
@@ -746,6 +836,7 @@
     if (!ended) {
       updateUnits(dt);
       healNearFire(dt);
+      updateArrows(dt);
       for (const e of effects) e.t += dt;
       for (let i = effects.length - 1; i >= 0; i--) if (effects[i].t > 0.9) effects.splice(i, 1);
       checkEnd();
