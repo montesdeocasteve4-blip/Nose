@@ -47,6 +47,11 @@
   #ring button[hidden] { display: none; }
   #zoombtn { position: fixed; top: calc(max(10px, env(safe-area-inset-top, 0px)) + 96px); right: max(10px, env(safe-area-inset-right, 0px));
           width: 40px; height: 40px; font-size: 10px; }
+  #forgebtn { position: fixed; top: calc(max(10px, env(safe-area-inset-top, 0px)) + 142px); right: max(10px, env(safe-area-inset-right, 0px));
+          width: 40px; height: 40px; font: inherit; font-size: 9px; font-weight: 700; color: #fff3dc; padding: 0; border-radius: 50%;
+          border: 2px solid rgba(255,190,90,.55); background: radial-gradient(circle at 35% 30%, rgba(96,64,38,.95), rgba(26,18,10,.93));
+          touch-action: none; -webkit-user-select: none; user-select: none; }
+  #forgebtn:active { transform: scale(.93); }
   #rack { position: fixed; left: 10px; bottom: 10px; width: min(70vw, 260px); max-height: 55vh; overflow: auto;
           background: rgba(20,28,14,.95); color: #eef5e0; border: 1px solid rgba(255,255,255,.25); border-radius: 12px;
           padding: 12px; z-index: 5; box-shadow: 0 10px 30px rgba(0,0,0,.5); }
@@ -78,6 +83,7 @@
     <button data-act="mount" class="b-mount" hidden>Montar</button>
   </div>
   <button data-act="zoom" id="zoombtn">Zoom</button>
+  <button data-act="forge" id="forgebtn">Herrero</button>
 </div>
 <div id="rack" hidden></div>
 <div id="over"></div>
@@ -308,7 +314,9 @@
   const DETECT_R = 240, GATHER_R = 120, ALERT_R = 360;
   // Establo (su techo bloquea), trampas de estacas frente a la entrada del frente, y el caballo
   const STABLE = { type: 'stable', x: 500, y: 380, w: 150, h: 60, sy: 440 };
-  const SOLIDS = WALLS.concat([STABLE]);
+  // Herrería dentro de la muralla: el herrero da +2 de daño a tu arma durante 30 s (cuesta una ración)
+  const FORGE = { type: 'forge', x: 860, y: 470, w: 120, h: 70, sy: 540 };
+  const SOLIDS = WALLS.concat([STABLE, FORGE]);
   // Grafo de navegación: esquinas de los obstáculos con margen (radio de la unidad + holgura)
   const NAV_M = 14;
   const NAV_OBS = SOLIDS.map(s => ({ x0: s.x - NAV_M + 1, y0: s.y - NAV_M + 1, x1: s.x + s.w + NAV_M - 1, y1: s.y + s.h + NAV_M - 1 }));
@@ -439,7 +447,7 @@
     const e = best;
     const toAttacker = Math.atan2(u.y - e.y, u.x - e.x);
     const facingAttacker = Math.abs(angDiff(toAttacker, e.f)) < 1.6;
-    let dmg = w.dmg;
+    let dmg = w.dmg + (u.forgeT > 0 ? 2 : 0); // +2 si el herrero afiló tu arma
     if (u.starving) dmg *= 0.9; // hambriento: 10% menos daño
     if (e.mounted) dmg *= 0.7; // a caballo recibes 30% menos daño
     if (e.blocking && e.shield && facingAttacker) {
@@ -706,6 +714,16 @@
     horse.y = u.y + Math.sin(u.f + Math.PI / 2) * 26;
     horse.moving = false;
   }
+  // Herrero: +2 de daño a tu arma durante 30 s a cambio de una ración de comida
+  function useForge() {
+    if (!control || control.dead || ended) return;
+    const fx = FORGE.x + FORGE.w / 2, fy = FORGE.y + FORGE.h / 2;
+    if (Math.hypot(control.x - fx, control.y - fy) > 120) { addEffect(control.x, control.y - 60, 'Ve a la herrería', '#ffd966'); return; }
+    if (FOOD.stock <= 0) { addEffect(control.x, control.y - 60, 'Sin comida', '#ff9a6a'); return; }
+    FOOD.stock--;
+    control.forgeT = 30;
+    addEffect(control.x, control.y - 60, '¡Arma +2 daño!', '#ffd966');
+  }
   function toggleMount() {
     if (!control || control.dead || ended) return;
     if (control.mounted) { dismount(control); return; }
@@ -927,7 +945,7 @@
   const ENEMY_FOOD = { stock: 2, t: 0 };
   function updateCamp(dt) {
     ENEMY_FOOD.t += dt;
-    if (ENEMY_FOOD.t >= CROP_TIME) { ENEMY_FOOD.t = 0; ENEMY_FOOD.stock = Math.min(10, ENEMY_FOOD.stock + 3); }
+    if (ENEMY_FOOD.t >= CROP_TIME) { ENEMY_FOOD.t = 0; ENEMY_FOOD.stock = Math.min(10, ENEMY_FOOD.stock + 4); } // campo mejorado: 4 raciones
     for (const C of CATAS) {
     C.cd -= dt;
     C.fire = Math.max(0, C.fire - dt);
@@ -972,33 +990,79 @@
       BOULDERS.splice(i, 1);
     }
   }
-  // Torre de vigilancia: (x, y) es su base; la plataforma queda a TOWER_TOP_LIFT sobre el pie del arquero
+  // Torre de castillo: (x, y) es su base; el arquero se para en la plataforma (TOWER_TOP_LIFT sobre su pie)
   function drawTower(t) {
     const { x, y } = t, H = t.h || 150;
+    const L = x - 28, Rr = x + 28, top = y - H + 20;
     ctx.fillStyle = 'rgba(0,0,0,0.25)';
-    ctx.beginPath(); ctx.ellipse(x + 4, y + 6, 26, 9, 0, 0, TAU); ctx.fill();
-    // patas de la torre
-    ctx.fillStyle = '#4a2f18'; ctx.fillRect(x - 18, y - 6, 5, 8); ctx.fillRect(x + 13, y - 6, 5, 8);
-    // escalera pegada a la cara lateral
-    ctx.fillStyle = '#6b4a2b'; ctx.fillRect(x + 16, y - H + 30, 4, H - 36);
-    for (let yy = y - H + 36; yy < y - 8; yy += 10) ctx.fillRect(x + 14, yy, 8, 2);
-    // cuerpo de troncos
-    ctx.fillStyle = '#7a5a3a'; ctx.fillRect(x - 16, y - H + 24, 32, H - 30);
-    ctx.fillStyle = '#5b3d24';
-    for (let yy = y - H + 32; yy < y - 8; yy += 12) ctx.fillRect(x - 16, yy, 32, 2);
-    // ventana con luz de vigilancia
-    ctx.fillStyle = '#3f2a16'; ctx.fillRect(x - 6, y - H + 56, 12, 12);
-    ctx.fillStyle = '#ffd966'; ctx.fillRect(x - 3, y - H + 59, 6, 6);
-    // plataforma con barandilla
-    ctx.fillStyle = '#8a6238'; ctx.fillRect(x - 24, y - H + 20, 48, 6);
-    ctx.fillStyle = '#5b3d24';
-    for (let i = -22; i <= 22; i += 11) ctx.fillRect(x + i, y - H + 8, 3, 12);
-    ctx.fillRect(x - 24, y - H + 8, 48, 3);
-    // tejado a dos aguas
-    ctx.fillStyle = '#8c2a22';
-    ctx.beginPath(); ctx.moveTo(x - 28, y - H + 20); ctx.lineTo(x, y - H - 14); ctx.lineTo(x + 28, y - H + 20); ctx.closePath(); ctx.fill();
-    ctx.fillStyle = '#a8382c';
-    ctx.beginPath(); ctx.moveTo(x, y - H - 14); ctx.lineTo(x + 28, y - H + 20); ctx.lineTo(x, y - H + 20); ctx.closePath(); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(x + 6, y + 6, 36, 11, 0, 0, TAU); ctx.fill();
+    // talud de piedra en la base, más ancho
+    ctx.fillStyle = '#6e6960';
+    ctx.beginPath(); ctx.moveTo(L - 8, y); ctx.lineTo(L + 4, y - 16); ctx.lineTo(Rr - 4, y - 16); ctx.lineTo(Rr + 8, y); ctx.closePath(); ctx.fill();
+    // cuerpo de sillares
+    ctx.fillStyle = '#8f8a80'; ctx.fillRect(L, top, 56, y - 16 - top);
+    ctx.strokeStyle = '#6b665e'; ctx.lineWidth = 1;
+    let row = 0;
+    for (let yy = top + 12; yy < y - 16; yy += 12, row++) {
+      ctx.beginPath(); ctx.moveTo(L, yy); ctx.lineTo(Rr, yy); ctx.stroke();
+      for (let xx = L + (row % 2 ? 8 : 0); xx < Rr; xx += 16) { ctx.beginPath(); ctx.moveTo(xx, yy); ctx.lineTo(xx, yy + 12); ctx.stroke(); }
+    }
+    // sombra del lado derecho
+    ctx.fillStyle = 'rgba(0,0,0,0.15)'; ctx.fillRect(x + 16, top, 12, y - 16 - top);
+    // almenas: merlones sobre el borde superior
+    ctx.fillStyle = '#8f8a80';
+    for (let xx = L; xx < Rr - 8; xx += 14) ctx.fillRect(xx, top - 12, 9, 12);
+    ctx.fillRect(Rr - 9, top - 12, 9, 12);
+    // aspilleras
+    ctx.fillStyle = '#2a2622';
+    ctx.fillRect(x - 2, top + 24, 4, 14);
+    ctx.fillRect(x - 2, top + 60, 4, 14);
+    ctx.fillRect(L + 8, top + 44, 3, 12); ctx.fillRect(Rr - 11, top + 44, 3, 12);
+    // puerta de arco en la base
+    ctx.fillStyle = '#3a2a1a';
+    ctx.beginPath(); ctx.moveTo(x - 6, y - 16); ctx.lineTo(x - 6, y - 26); ctx.arc(x, y - 26, 6, Math.PI, 0); ctx.lineTo(x + 6, y - 16); ctx.closePath(); ctx.fill();
+    // asta con bandera
+    ctx.fillStyle = '#4a3a2a'; ctx.fillRect(x - 1, top - 44, 2, 32);
+    ctx.fillStyle = '#b8322b';
+    ctx.beginPath(); ctx.moveTo(x + 1, top - 44); ctx.lineTo(x + 18, top - 38); ctx.lineTo(x + 1, top - 32); ctx.closePath(); ctx.fill();
+  }
+  // Herrería: fragua encendida, chimenea con humo, yunque y el herrero junto a la puerta
+  function drawForge(f, t) {
+    const { x, y, w, h } = f;
+    ctx.fillStyle = 'rgba(0,0,0,0.25)';
+    ctx.beginPath(); ctx.ellipse(x + w / 2, y + h + 4, w / 2 + 6, 8, 0, 0, TAU); ctx.fill();
+    // paredes de madera y piedra
+    ctx.fillStyle = '#6f5a44'; ctx.fillRect(x, y, w, h);
+    ctx.strokeStyle = '#55432f'; ctx.lineWidth = 1;
+    for (let xx = x + 14; xx < x + w; xx += 14) { ctx.beginPath(); ctx.moveTo(xx, y); ctx.lineTo(xx, y + h); ctx.stroke(); }
+    // techo a dos aguas
+    ctx.fillStyle = '#4a3a2a';
+    ctx.beginPath(); ctx.moveTo(x - 8, y + 6); ctx.lineTo(x + w / 2, y - 22); ctx.lineTo(x + w + 8, y + 6); ctx.closePath(); ctx.fill();
+    // chimenea de piedra y humo
+    ctx.fillStyle = '#5a544c'; ctx.fillRect(x + w - 24, y - 30, 12, 26);
+    for (let i = 0; i < 3; i++) {
+      const k = ((t * 0.4) + i / 3) % 1;
+      ctx.fillStyle = 'rgba(200,200,200,' + (0.35 * (1 - k)).toFixed(3) + ')';
+      ctx.beginPath(); ctx.arc(x + w - 18 + k * 10, y - 32 - k * 28, 4 + k * 5, 0, TAU); ctx.fill();
+    }
+    // boca de la fragua encendida
+    ctx.fillStyle = '#2a221c'; ctx.fillRect(x + 12, y + h - 30, 26, 22);
+    const fl = 1 + Math.sin(t * 12) * 0.15;
+    ctx.fillStyle = '#ff7a1c';
+    ctx.beginPath(); ctx.moveTo(x + 16, y + h - 8); ctx.quadraticCurveTo(x + 25, y + h - 30 * fl, x + 34, y + h - 8); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#ffd166';
+    ctx.beginPath(); ctx.moveTo(x + 21, y + h - 8); ctx.quadraticCurveTo(x + 25, y + h - 20 * fl, x + 29, y + h - 8); ctx.closePath(); ctx.fill();
+    // yunque
+    ctx.fillStyle = '#333'; ctx.fillRect(x + w - 42, y + h - 14, 18, 6); ctx.fillRect(x + w - 39, y + h - 8, 12, 8);
+    // letrero
+    ctx.fillStyle = '#fff3dc'; ctx.font = 'bold 10px system-ui, sans-serif'; ctx.textAlign = 'center';
+    ctx.fillText('HERRERÍA', x + w / 2, y - 6); ctx.textAlign = 'start';
+    // el herrero, junto a la puerta
+    const hx = x + w + 14, hy = y + h - 12;
+    ctx.fillStyle = '#7a3a22'; ctx.fillRect(hx - 5, hy - 18, 10, 16);
+    ctx.fillStyle = '#3a2a1a'; ctx.fillRect(hx - 6, hy - 6, 12, 8);
+    ctx.fillStyle = '#e0b48a'; ctx.beginPath(); ctx.arc(hx, hy - 22, 4.5, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#2a2a2a'; ctx.fillRect(hx - 5, hy - 27, 10, 3);
   }
   function drawTent(t) {
     const { x, y } = t;
@@ -1441,6 +1505,7 @@
       if (u.dead) continue;
       u.cd = Math.max(0, u.cd - dt);
       u.fireT = Math.max(0, (u.fireT || 0) - dt);
+      u.forgeT = Math.max(0, (u.forgeT || 0) - dt);
       u.flash = Math.max(0, u.flash - dt);
       u.blockT = Math.max(0, u.blockT - dt);
       if (u.team !== 'civ') { hungerUpdate(u, dt); if (u.dead) continue; }
@@ -2012,6 +2077,7 @@
     else if (k === 'e') orderAttack();
     else if (k === 'r') orderDefend();
     else if (k === 'b') orderBase();
+    else if (k === 'h') useForge();
     else if (k === 'tab') cycleControl();
   });
   window.addEventListener('keyup', e => keys.delete(e.key.toLowerCase()));
@@ -2171,6 +2237,7 @@
         if (control && !control.dead) doAttack(control);
       } else if (act === 'squad') toggleSquad();
       else if (act === 'base') orderBase();
+      else if (act === 'forge') useForge();
       else if (act === 'mount') toggleMount();
       else if (act === 'rack') toggleRack();
       else if (act === 'zoom') { zoomIdx = (zoomIdx + 1) % ZOOMS.length; zoom = ZOOMS[zoomIdx]; clampCamera(); }
@@ -2206,7 +2273,7 @@
     for (const s of SEATS) items.push(s);
     for (const d of DUMMIES) items.push(d);
     items.push(...TENTS, CATA, CATA2, CAMP_FIRE);
-    items.push(FIELD, KITCHEN, HOUSE, TOWER);
+    items.push(FIELD, KITCHEN, HOUSE, TOWER, FORGE);
     for (const b of BOULDERS) items.push(b);
     for (const p of PITS) items.push(p);
     if (!horse.rider) items.push(horse);
@@ -2223,6 +2290,7 @@
       else if (it.type === 'dummy') drawDummy(it);
       else if (it.type === 'tent') drawTent(it);
       else if (it.type === 'tower') drawTower(it);
+      else if (it.type === 'forge') drawForge(it, t);
       else if (it.type === 'cata') drawCata(it);
       else if (it.type === 'campfire') drawCampFire(it, t);
       else if (it.type === 'boulder') drawBoulder(it);
