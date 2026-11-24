@@ -84,6 +84,8 @@
 <script>
 (() => {
   const WORLD_W = 3600, WORLD_H = 2200;
+  // Margen extra en tu lado (izquierda y arriba): el mundo jugable empieza en X0,Y0
+  const X0 = -360, Y0 = -240, VW = WORLD_W - X0, VH = WORLD_H - Y0;
   const canvas = document.getElementById('c');
   const ctx = canvas.getContext('2d');
   const hud = document.getElementById('hud');
@@ -203,11 +205,11 @@
     return true;
   };
   for (let tries = 0; trees.length < 650 && tries < 6000; tries++) {
-    const x = R(70, WORLD_W - 70), y = R(70, WORLD_H - 70), r = R(20, 32);
+    const x = R(X0 + 70, WORLD_W - 70), y = R(Y0 + 70, WORLD_H - 70), r = R(20, 32);
     if (isFree(x, y, r, 12)) { const t = { type: 'tree', x, y, r, v: Math.floor(rand() * 3) }; trees.push(t); decor.push(t); }
   }
   for (let tries = 0; bushes.length < 420 && tries < 6000; tries++) {
-    const x = R(60, WORLD_W - 60), y = R(60, WORLD_H - 60), r = R(13, 24);
+    const x = R(X0 + 60, WORLD_W - 60), y = R(Y0 + 60, WORLD_H - 60), r = R(13, 24);
     if (isFree(x, y, r, 2)) {
       const b = { type: 'bush', x, y, r, v: Math.floor(rand() * 3), berries: rand() < 0.3 };
       bushes.push(b); decor.push(b);
@@ -218,24 +220,25 @@
 
   // ---------- Suelo pre-renderizado ----------
   const ground = document.createElement('canvas');
-  ground.width = WORLD_W; ground.height = WORLD_H;
+  ground.width = VW; ground.height = VH;
   (function buildGround() {
     const g = ground.getContext('2d');
+    g.translate(-X0, -Y0);
     g.fillStyle = '#43702c';
-    g.fillRect(0, 0, WORLD_W, WORLD_H);
+    g.fillRect(X0, Y0, VW, VH);
     const patch = ['#3a6626', '#4b7a33', '#37601f', '#557f38'];
     for (let i = 0; i < 420; i++) {
       g.globalAlpha = 0.3; g.fillStyle = patch[Math.floor(rand() * patch.length)];
-      g.beginPath(); g.arc(R(0, WORLD_W), R(0, WORLD_H), R(40, 150), 0, TAU); g.fill();
+      g.beginPath(); g.arc(R(X0, WORLD_W), R(Y0, WORLD_H), R(40, 150), 0, TAU); g.fill();
     }
     g.globalAlpha = 0.6; g.strokeStyle = '#2c5219'; g.lineWidth = 1.2;
     for (let i = 0; i < 6000; i++) {
-      const x = R(0, WORLD_W), y = R(0, WORLD_H), l = R(4, 8), a = R(-0.4, 0.4) - Math.PI / 2;
+      const x = R(X0, WORLD_W), y = R(Y0, WORLD_H), l = R(4, 8), a = R(-0.4, 0.4) - Math.PI / 2;
       g.beginPath(); g.moveTo(x, y); g.lineTo(x + Math.cos(a) * l, y + Math.sin(a) * l); g.stroke();
     }
     for (let i = 0; i < 900; i++) {
       g.globalAlpha = 0.55; g.fillStyle = rand() < 0.5 ? '#8a5a22' : '#a0702a';
-      g.beginPath(); g.ellipse(R(0, WORLD_W), R(0, WORLD_H), R(1.5, 3), R(1, 2), R(0, 3), 0, TAU); g.fill();
+      g.beginPath(); g.ellipse(R(X0, WORLD_W), R(Y0, WORLD_H), R(1.5, 3), R(1, 2), R(0, 3), 0, TAU); g.fill();
     }
     for (const c of CLEARINGS) {
       g.globalAlpha = 0.85; g.fillStyle = '#8a7a4c';
@@ -1068,7 +1071,7 @@
     if (m.state === 'toKitchen') {
       if (!walkStep(u, counterPos(), sp)) return true;
       const seat = SEATS.find(s => !s.user);
-      if (!seat) return true;
+      if (!seat) { releaseMeal(u, true); return true; } // sin sitio libre: vuelve a su puesto en vez de quedarse parado
       if (FOOD.stock <= 0) { u.hungry = true; return true; } // espera en la cocina a que haya comida
       eatMeal(u);
       seat.user = u; m.seat = seat; m.state = 'toSeat';
@@ -1391,8 +1394,8 @@
           break;
         }
       }
-      u.x = clamp(u.x + u.vx * k * dt, 30, WORLD_W - 30);
-      u.y = clamp(u.y + u.vy * k * dt, 30, WORLD_H - 30);
+      u.x = clamp(u.x + u.vx * k * dt, X0 + 30, WORLD_W - 30);
+      u.y = clamp(u.y + u.vy * k * dt, Y0 + 30, WORLD_H - 30);
       for (const w of SOLIDS) pushOutOfWall(u, w);
       if (u.vx || u.vy) u.walkT += dt * 9;
     }
@@ -1473,7 +1476,7 @@
       }
       const far = Math.hypot(a.x - a.sx, a.y - a.sy) > a.range;
       const inWall = SOLIDS.some(w => a.x >= w.x && a.x <= w.x + w.w && a.y >= w.y && a.y <= w.y + w.h);
-      if (hit || far || inWall || a.x < 0 || a.y < 0 || a.x > WORLD_W || a.y > WORLD_H) arrows.splice(i, 1);
+      if (hit || far || inWall || a.x < X0 || a.y < Y0 || a.x > WORLD_W || a.y > WORLD_H) arrows.splice(i, 1);
     }
   }
 
@@ -1876,10 +1879,10 @@
 
   // ---------- Cámara ----------
   function clampCamera() {
-    const hw = Math.min(W / 2 / zoom, WORLD_W / 2);
-    const hh = Math.min(H / 2 / zoom, WORLD_H / 2);
-    cam.x = clamp(cam.x, hw, WORLD_W - hw);
-    cam.y = clamp(cam.y, hh, WORLD_H - hh);
+    const hw = Math.min(W / 2 / zoom, VW / 2);
+    const hh = Math.min(H / 2 / zoom, VH / 2);
+    cam.x = clamp(cam.x, X0 + hw, WORLD_W - hw);
+    cam.y = clamp(cam.y, Y0 + hh, WORLD_H - hh);
   }
 
   function resize() {
@@ -1933,6 +1936,9 @@
   // Órdenes de escuadra: recuerdan el modo base; durante una alarma se aplican al terminarla
   function setOrder(m) {
     for (const p of squadGroup()) {
+      // Cualquier orden corta la comida en curso: nadie se queda sentado o esperando en la cocina
+      if (p.meal && p.meal.state !== 'idle') releaseMeal(p, true);
+      p.hungry = false;
       p.homeMode = m;
       if (!alert.active || alert.phase === 'engage') p.mode = m;
     }
@@ -2081,7 +2087,7 @@
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     ctx.setTransform(dpr * zoom, 0, 0, dpr * zoom,
                      dpr * (W / 2 - cam.x * zoom), dpr * (H / 2 - cam.y * zoom));
-    ctx.drawImage(ground, 0, 0);
+    ctx.drawImage(ground, X0, Y0);
 
     const m = 80 / zoom;
     const left = cam.x - W / 2 / zoom - m, right = cam.x + W / 2 / zoom + m;
@@ -2157,12 +2163,13 @@
   const mini = document.getElementById('mini');
   const mctx = mini.getContext('2d');
   const MW = mini.width, MH = mini.height;
-  const msx = MW / WORLD_W, msy = MH / WORLD_H;
+  const msx = MW / VW, msy = MH / VH;
   const miniBg = document.createElement('canvas');
   miniBg.width = MW; miniBg.height = MH;
   (function buildMiniBg() {
     const g = miniBg.getContext('2d');
     g.fillStyle = '#43702c'; g.fillRect(0, 0, MW, MH);
+    g.translate(-X0 * msx, -Y0 * msy);
     g.fillStyle = '#6b4a2b';
     for (const w of WALLS) g.fillRect(w.x * msx, w.y * msy, Math.max(1, w.w * msx), Math.max(1, w.h * msy));
     for (const c of CLEARINGS) {
@@ -2180,6 +2187,8 @@
 
   function renderMini() {
     mctx.drawImage(miniBg, 0, 0);
+    mctx.save();
+    mctx.translate(-X0 * msx, -Y0 * msy);
     mctx.fillStyle = '#7a5230';
     mctx.fillRect(RACK_POS.x * msx - 2, RACK_POS.y * msy - 2, 4, 4);
     mctx.fillStyle = '#ff9f1c';
@@ -2201,6 +2210,7 @@
     const vw = W / zoom * msx, vh = H / zoom * msy;
     mctx.strokeStyle = 'rgba(255,255,255,0.85)'; mctx.lineWidth = 1;
     mctx.strokeRect(cam.x * msx - vw / 2, cam.y * msy - vh / 2, vw, vh);
+    mctx.restore();
   }
 
   // ---------- Bucle ----------
