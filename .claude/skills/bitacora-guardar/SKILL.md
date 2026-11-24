@@ -38,6 +38,8 @@ Reglas de contenido:
 
 ## Reglas de eficiencia (siempre, no solo al guardar)
 
+- El usuario juega desde teléfono: cualquier cambio al juego debe funcionar en pantalla táctil y angosta (ver la skill `ejercito-rival`).
+
 - Lee solo las partes del código que necesitas para la tarea actual. Usa búsqueda por nombre de función o rango de líneas en vez de leer el archivo completo.
 - No hagas pruebas innecesarias. Revisa el código con lectura atenta y cambia lo puntual. Una prueba solo cuando el cambio sea difícil de verificar leyendo.
 - No repitas código ni texto que ya está en la conversación.

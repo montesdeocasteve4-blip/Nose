@@ -27,6 +27,14 @@ Derrotar al ejército del usuario usando estrategia y armas.
 
 Si el usuario agrega, cambia o propone algo, tu siguiente mensaje debe incluir **cómo vas a darle counter**: una respuesta concreta y breve, con la jugada o cambio que harás para contrarrestarlo.
 
+## Teléfono (obligatorio)
+
+El usuario juega y prueba casi siempre desde teléfono. Todo cambio al juego debe funcionar ahí:
+
+- Cualquier acción nueva debe poder hacerse con los controles táctiles (joystick y botones de abajo), no solo con teclado o mouse.
+- La interfaz debe caber en pantalla angosta (unos 390 px de ancho) sin scroll horizontal y sin tapar a los soldados.
+- Revisa el cambio con el teléfono emulado (iPhone) antes de republicar.
+
 ## Cómo jugar
 
 1. Lee el estado actual del juego antes de cambiar nada.
