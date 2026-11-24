@@ -564,7 +564,8 @@
     const e = nearestEnemy(u);
     if (e) {
       const d = Math.hypot(e.x - u.x, e.y - u.y);
-      u.f = Math.atan2(e.y - u.y, e.x - u.x);
+      // Apunta desde la altura real del arquero (arriba de la torre), no desde el suelo
+      u.f = Math.atan2(e.y - (u.y - (u.climb || 0)), e.x - u.x);
       if (u.weapon === 'bow' && d <= WEAPONS.bow.ranged.range && u.cd <= 0) fireArrow(u, 0.05);
     }
     const dx = TOWER_HOLD.x - u.x, dy = TOWER_HOLD.y - u.y, d = Math.hypot(dx, dy);
@@ -1649,7 +1650,9 @@
     u.cd = WEAPONS.bow.cd;
     u.fireT = 0.25;
     const a = u.f + (rand() * 2 - 1) * spread;
-    arrows.push({ x: u.x, y: u.y, sx: u.x, sy: u.y, vx: Math.cos(a) * R.speed, vy: Math.sin(a) * R.speed,
+    // Desde la altura real del arquero (si está subido a la torre, la flecha sale desde arriba)
+    const oy = u.y - (u.climb || 0);
+    arrows.push({ x: u.x, y: oy, sx: u.x, sy: oy, vx: Math.cos(a) * R.speed, vy: Math.sin(a) * R.speed,
                   team: u.team, range: R.range, dmg: R.dmg * (u.starving ? 0.9 : 1) });
   }
 
@@ -1751,7 +1754,7 @@
 
   function checkEnd() {
     if (control.dead) {
-      const alive = player.find(p => !p.dead);
+      const alive = player.find(p => !p.dead && !p.tower);
       if (alive) setControl(alive);
     }
     if (!ended) {
@@ -2168,7 +2171,8 @@
   function orderDefend() { setOrder('fogata'); }
   function orderBase() { setOrder('base'); }
   function cycleControl() {
-    const alive = player.filter(p => !p.dead);
+    // El arquero de la torre no se puede controlar: solo los soldados de tierra
+    const alive = player.filter(p => !p.dead && !p.tower);
     if (alive.length) setControl(alive[(alive.indexOf(control) + 1) % alive.length]);
   }
 
