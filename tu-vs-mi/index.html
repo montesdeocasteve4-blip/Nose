@@ -372,7 +372,10 @@
   const TOWER = { type: 'tower', x: FX1 - 120, y: FMY - 170, sy: FMY - 170, h: 150 };
   // Pie de la torre (delante de la base); desde aquí el arquero sube al puesto de arriba
   const TOWER_HOLD = { x: FX1 - 120, y: FMY - 156 };
-  const TOWER_TOP_LIFT = 142;
+  // Altura para que los pies queden justo sobre el suelo de la plataforma
+  const TOWER_TOP_LIFT = 144;
+  // Puesto en tierra del segundo soldado: sube a la plataforma cuando el arquero baja a comer
+  const TOWER_HOLD2 = { x: TOWER.x + 18, y: TOWER_HOLD.y };
   const TOWER_SIGHT = 700;
   const GATE_POINT = { x: FX1 - 90, y: FMY };
   let towerMode = 'none';
@@ -553,14 +556,17 @@
     addEffect(TOWER.x, TOWER.y - 60, mode === 'one' ? '¡Un enemigo!' : '¡Ataque!', '#ff6b6b');
   }
   function towerThink(u, dt) {
-    // Sube al puesto de arriba al llegar a la base y baja cuando se va a comer o a otro lugar
-    const atBase = Math.hypot(TOWER_HOLD.x - u.x, TOWER_HOLD.y - u.y) <= 12;
-    const up = atBase && !(u.meal && u.meal.state !== 'idle') ? TOWER_TOP_LIFT : 0;
-    u.climb = (u.climb || 0) + clamp(up - (u.climb || 0), -dt * 120, dt * 120);
-    // Solo baja a comer si su compañero de torre está arriba; si no, espera a que vuelva
+    // El arquero sube a la plataforma a disparar. El otro soldado sube solo cuando el arquero baja a comer
+    const isArcher = u.weapon === 'bow';
+    const hold = isArcher ? TOWER_HOLD : TOWER_HOLD2;
     const partner = player.find(q => q !== u && q.tower && !q.dead);
-    const partnerBusy = partner && partner.meal && partner.meal.state !== 'idle';
-    if ((u.meal && u.meal.state !== 'idle') || !partnerBusy) { if (mealUpdate(u, dt)) return; }
+    const partnerBusy = !!(partner && partner.meal && partner.meal.state !== 'idle');
+    const selfBusy = !!(u.meal && u.meal.state !== 'idle');
+    const atHold = Math.hypot(hold.x - u.x, hold.y - u.y) <= 12;
+    const wantUp = atHold && !selfBusy && (isArcher || partnerBusy);
+    u.climb = (u.climb || 0) + clamp((wantUp ? TOWER_TOP_LIFT : 0) - (u.climb || 0), -dt * 120, dt * 120);
+    // Solo baja a comer si su compañero no está comiendo; si no, espera a que vuelva
+    if (selfBusy || !partnerBusy) { if (mealUpdate(u, dt)) return; }
     const e = nearestEnemy(u);
     if (e) {
       const d = Math.hypot(e.x - u.x, e.y - u.y);
@@ -568,13 +574,13 @@
       u.f = Math.atan2(e.y - (u.y - (u.climb || 0)), e.x - u.x);
       if (u.weapon === 'bow' && d <= WEAPONS.bow.ranged.range && u.cd <= 0) fireArrow(u, 0.05);
     }
-    const dx = TOWER_HOLD.x - u.x, dy = TOWER_HOLD.y - u.y, d = Math.hypot(dx, dy);
+    const dx = hold.x - u.x, dy = hold.y - u.y, d = Math.hypot(dx, dy);
     if (d > 10) { const sp = WEAPONS.bow.speed * 0.8; u.vx = dx / d * sp; u.vy = dy / d * sp; }
   }
   // Puesto de guardia: en modo Base, tres vigilan las entradas; el resto rodea la fogata
   function homePos(u) {
     const s = u.slot || 0;
-    if (u.tower) return TOWER_HOLD;
+    if (u.tower) return u.weapon === 'bow' ? TOWER_HOLD : TOWER_HOLD2;
     if (u.homeMode === 'base' && u.post >= 0) return GATE_GUARD[GUARD_IDX[u.post]];
     // Sin puesto asignado: ocupa un puesto libre de la muralla en vez de quedarse junto a la fogata
     if (u.homeMode === 'base') {
@@ -2084,13 +2090,14 @@
     // barra de vida y marcador del soldado controlado
     // barra de vida: siempre visible
     ctx.fillStyle = 'rgba(0,0,0,0.6)';
-    ctx.fillRect(u.x - 15, u.y - 62, 30, 5);
+    const ly = u.y - (u.climb || 0); // la barra sigue a la altura real del soldado (subido a la torre o no)
+    ctx.fillRect(u.x - 15, ly - 62, 30, 5);
     ctx.fillStyle = u.hp > 50 ? '#6ccf4f' : '#e74c3c';
-    ctx.fillRect(u.x - 15, u.y - 62, 30 * u.hp / 100, 5);
+    ctx.fillRect(u.x - 15, ly - 62, 30 * u.hp / 100, 5);
     if (u.team !== 'civ') { // barra de hambre: fina, bajo la de vida; amarilla, morada si está hambriento
-      ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(u.x - 15, u.y - 55, 30, 2);
+      ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(u.x - 15, ly - 55, 30, 2);
       ctx.fillStyle = u.starving ? '#9b59b6' : '#f2c14e';
-      ctx.fillRect(u.x - 15, u.y - 55, 30 * u.hunger / 100, 2);
+      ctx.fillRect(u.x - 15, ly - 55, 30 * u.hunger / 100, 2);
     }
     if (u.ctrl) {
       ctx.fillStyle = '#ffd966';
