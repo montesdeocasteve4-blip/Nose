@@ -45,6 +45,7 @@
   #ring .b-base { width: 58px; height: 58px; right: 128px; bottom: 15px; font-size: 11px; }
   #ring .b-mount { width: 60px; height: 60px; right: 6px; bottom: 226px; font-size: 11px; }
   #ring button[hidden] { display: none; }
+  #ring .b-fire { width: 56px; height: 56px; right: 98px; bottom: 218px; font-size: 10px; }
   #zoombtn { position: fixed; top: calc(max(10px, env(safe-area-inset-top, 0px)) + 96px); right: max(10px, env(safe-area-inset-right, 0px));
           width: 40px; height: 40px; font-size: 10px; }
   #rack { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(92vw, 360px); max-height: 80vh; overflow: auto;
@@ -76,6 +77,7 @@
     <button data-act="squad" class="b-squad">Esc.: ataque</button>
     <button data-act="base" class="b-base">Base</button>
     <button data-act="mount" class="b-mount" hidden>Montar</button>
+    <button data-act="fire" class="b-fire">Fuego: no</button>
   </div>
   <button data-act="zoom" id="zoombtn">Zoom</button>
 </div>
@@ -165,6 +167,7 @@
     axe:        { name: 'Hacha',     reach: 40, dmg: 24, cd: 1.1, swing: 0.5,  speed: 102, shield: true,  a0: -1.0 },
     greatsword: { name: 'Espadón',   reach: 52, dmg: 30, cd: 1.4, swing: 0.55, speed: 90,  shield: false, a0: -1.0 },
     // Arco: dispara a distancia; reach/dmg son la espada corta de respaldo
+    hoe:        { name: 'Azada',    reach: 0, dmg: 0, cd: 99, swing: 0.3, speed: 70, shield: false, a0: -0.8 },
     bow:        { name: 'Arco',      reach: 40, dmg: 12, cd: 1.2, swing: 0.35, speed: 100, shield: false, a0: 0,
                   ranged: { range: 380, speed: 520, dmg: 22 } }
   };
@@ -337,7 +340,7 @@
     enemyWave = false; enemyTimer = 0;
     resetEconomy();
     enemy =SPAWN_ENEMY.map((w, i) => makeUnit('enemy', w, ENEMY_POS[i][0], ENEMY_POS[i][1], Math.PI, 'attack'));
-    units = [...player, ...enemy];
+    units = [...player, ...enemy, FARMER];
     effects = [];
     arrows = [];
     ended = null;
@@ -347,6 +350,7 @@
   }
 
   function startSwing(u) {
+    if (u.team === 'player' && !u.ctrl && !fireFree) return;
     const w = WEAPONS[u.weapon];
     u.swing = w.swing; u.swingTotal = w.swing;
     u.cd = w.cd; u.hitDone = false;
@@ -361,7 +365,7 @@
     const arc = u.weapon === 'spear' ? 0.6 : 1.2;
     let best = null, bd = Infinity;
     for (const e of [...units, ...DUMMIES]) {
-      if (e.team === u.team || e.dead) continue;
+      if (e.team === u.team || e.team === 'civ' || e.dead) continue;
       const dx = e.x - u.x, dy = e.y - u.y, d = Math.hypot(dx, dy);
       if (d > w.reach + 8) continue;
       if (Math.abs(angDiff(Math.atan2(dy, dx), u.f)) > arc) continue;
@@ -396,7 +400,7 @@
     const limit = u.team === 'enemy' ? 700 : (u.mode === 'attack' || engaging ? Infinity : 300);
     let best = null, bd = limit;
     for (const e of units) {
-      if (e.team === u.team || e.dead) continue;
+      if (e.team === u.team || e.team === 'civ' || e.dead) continue;
       const d = Math.hypot(e.x - u.x, e.y - u.y);
       if (d < bd) { bd = d; best = e; }
     }
@@ -452,7 +456,7 @@
   function nearestEnemy(u) {
     let best = null, bd = Infinity;
     for (const e of units) {
-      if (e.team === u.team || e.dead) continue;
+      if (e.team === u.team || e.team === 'civ' || e.dead) continue;
       const d = Math.hypot(e.x - u.x, e.y - u.y);
       if (d < bd) { bd = d; best = e; }
     }
@@ -866,24 +870,29 @@
     ctx.quadraticCurveTo(x + 2, y - 10, x + 4, y - 1); ctx.closePath(); ctx.fill();
   }
 
-  // ---------- Campo, cocina y comida de tu escuadra ----------
-  const FIELD = { type: 'field', x: 980, y: 1480, w: 190, h: 120, t: 0, sy: 1600 };
-  const KITCHEN = { type: 'kitchen', x: 880, y: 1010, built: false, t: 0, sy: 1030 };
+  // ---------- Cocina, campo, granjero y comidas de tu escuadra ----------
+  const FIELD = { type: 'field', x: 580, y: 1280, w: 200, h: 110, t: 0, sy: 1390 };
+  const KITCHEN = { type: 'kitchen', x: 500, y: 1230, built: true, t: 0, sy: 1250 };
   const FOOD = { stock: 2 };
+  const CROP_TIME = 50;
+  let FARMER = null, fireFree = false;
+  const counterPos = () => ({ x: KITCHEN.x + 34, y: KITCHEN.y + 26 });
   function resetEconomy() {
-    FIELD.t = 0; KITCHEN.built = false; KITCHEN.t = 0; FOOD.stock = 2;
+    FIELD.t = 0; FOOD.stock = 2; fireFree = false;
+    KITCHEN.built = true; KITCHEN.t = 0;
     for (const s of SEATS) s.user = null;
+    FARMER = makeUnit('civ', 'hoe', 540, 1300, 0, 'fogata');
+    FARMER.task = 'idle'; FARMER.carry = 0;
   }
-  // El campo madura en 60 s; entonces aparece la cocina, que hace 1 comida cada 20 s (máximo 10)
+  // El campo madura en 50 s. La cocina destruida se reconstruye en 30 s
   function updateEconomy(dt) {
+    FIELD.t = Math.min(CROP_TIME, FIELD.t + dt);
     if (!KITCHEN.built) {
-      FIELD.t = Math.min(60, FIELD.t + dt);
-      if (FIELD.t >= 60) { KITCHEN.built = true; addEffect(KITCHEN.x, KITCHEN.y - 50, 'Cocina lista', '#ffd966'); }
-    } else {
       KITCHEN.t += dt;
-      if (KITCHEN.t >= 20) { KITCHEN.t = 0; FOOD.stock = Math.min(10, FOOD.stock + 1); }
+      if (KITCHEN.t >= 30) { KITCHEN.built = true; KITCHEN.t = 0; }
     }
   }
+  function toggleFire() { fireFree = !fireFree; }
   function cleanSeats() {
     for (const s of SEATS) if (s.user && (s.user.dead || !s.user.meal || s.user.meal.seat !== s)) s.user = null;
   }
@@ -908,91 +917,148 @@
     m.state = returning ? 'returning' : 'idle';
     m.t = 0;
   }
-  // Comidas escalonadas: cada soldado tiene su propio reloj. Devuelve true si el soldado está comiendo o yendo a la fogata
+  // Se mueve hacia p; devuelve true cuando llega
+  function walkStep(u, p, sp) {
+    const dx = p.x - u.x, dy = p.y - u.y, d = Math.hypot(dx, dy);
+    if (d < 8) { u.vx = 0; u.vy = 0; return true; }
+    const q = navPoint(u, p), qx = q.x - u.x, qy = q.y - u.y, qd = Math.hypot(qx, qy) || 1;
+    u.vx = qx / qd * sp; u.vy = qy / qd * sp;
+    return false;
+  }
+  // Comida: va a la cocina, toma su plato, se sienta en la fogata 5-9 s y regresa a su puesto
   function mealUpdate(u, dt) {
-    if (!u.meal) u.meal = { state: 'idle', timer: 30 + rand() * 50, seat: null, t: 0 };
+    if (!u.meal) u.meal = { state: 'idle', timer: 30 + rand() * 50, seat: null, t: 0, dur: 6 };
     const m = u.meal;
-    if (u.ctrl || alert.active) {
-      if (m.state !== 'idle') releaseMeal(u, false);
-      return false;
-    }
+    if (u.ctrl || alert.active) { if (m.state !== 'idle') releaseMeal(u, false); return false; }
+    const sp = WEAPONS[u.weapon].speed * 0.7;
     if (m.state === 'idle') {
       m.timer -= dt;
       if (m.timer > 0 || !canLeavePost(u)) return false;
-      const seat = SEATS.find(s => !s.user);
-      if (!seat) return false;
-      seat.user = u; m.seat = seat; m.state = 'going';
+      m.state = 'toKitchen';
     }
-    const sp = WEAPONS[u.weapon].speed * 0.7;
-    if (m.state === 'going') {
-      const dx = m.seat.x - u.x, dy = m.seat.y - u.y, d = Math.hypot(dx, dy);
-      if (d < 8) { m.state = 'eating'; m.t = 0; return true; }
-      const p = navPoint(u, m.seat), px = p.x - u.x, py = p.y - u.y, pd = Math.hypot(px, py) || 1;
-      u.vx = px / pd * sp; u.vy = py / pd * sp;
+    if (m.state === 'toKitchen') {
+      if (!walkStep(u, counterPos(), sp)) return true;
+      const seat = SEATS.find(s => !s.user);
+      if (!seat) return true;
+      if (FOOD.stock <= 0) { u.hungry = true; releaseMeal(u, false); m.timer = 12; return false; }
+      FOOD.stock--; u.hungry = false;
+      seat.user = u; m.seat = seat; m.state = 'toSeat';
+      return true;
+    }
+    if (m.state === 'toSeat') {
+      if (walkStep(u, m.seat, sp)) { m.state = 'eating'; m.t = 0; m.dur = 5 + rand() * 4; }
       return true;
     }
     if (m.state === 'eating') {
-      m.t += dt;
+      m.t += dt; u.vx = 0; u.vy = 0;
       u.f = Math.atan2(FIRE.y - u.y, FIRE.x - u.x);
-      if (m.t >= 4) {
-        if (FOOD.stock > 0) { FOOD.stock--; u.hungry = false; }
-        else u.hungry = true;
-        releaseMeal(u, true);
-      }
+      if (m.t >= m.dur) releaseMeal(u, true);
       return true;
     }
     // volviendo a su puesto
-    const h = homePos(u), dx = h.x - u.x, dy = h.y - u.y, d = Math.hypot(dx, dy);
-    if (d < 10) { m.state = 'idle'; return false; }
-    const p = navPoint(u, h), px = p.x - u.x, py = p.y - u.y, pd = Math.hypot(px, py) || 1;
-    u.vx = px / pd * sp; u.vy = py / pd * sp;
+    if (walkStep(u, homePos(u), sp)) { m.state = 'idle'; return false; }
     return true;
   }
-  function drawField(f) {
-    ctx.fillStyle = 'rgba(0,0,0,0.2)';
-    ctx.fillRect(f.x + 4, f.y + 6, f.w, f.h);
-    ctx.fillStyle = '#5a3d22'; ctx.fillRect(f.x, f.y, f.w, f.h);
-    ctx.strokeStyle = '#3f2a16'; ctx.lineWidth = 2; ctx.strokeRect(f.x, f.y, f.w, f.h);
-    const ripe = f.t >= 60, g = Math.min(1, f.t / 60);
-    for (let row = 0; row < 4; row++) {
-      const y = f.y + 14 + row * 27;
-      ctx.strokeStyle = '#3f2a16'; ctx.lineWidth = 1;
-      ctx.beginPath(); ctx.moveTo(f.x + 4, y + 10); ctx.lineTo(f.x + f.w - 4, y + 10); ctx.stroke();
-      for (let col = 0; col < 9; col++) {
-        const x = f.x + 12 + col * 19, h = 3 + g * 12;
-        ctx.strokeStyle = ripe ? '#d9b54a' : '#5a9a3a'; ctx.lineWidth = 2;
-        ctx.beginPath(); ctx.moveTo(x, y + 10); ctx.lineTo(x, y + 10 - h); ctx.stroke();
-        if (g > 0.3) {
-          ctx.fillStyle = ripe ? '#f0d060' : '#78b84a';
-          ctx.beginPath(); ctx.ellipse(x - 2, y + 10 - h, 2, 3, 0, 0, TAU); ctx.fill();
-        }
+  // El granjero cosecha el campo cuando madura y lleva la cosecha a la cocina (1 cosecha = 3 comidas)
+  function farmThink(u, dt) {
+    const sp = WEAPONS.hoe.speed;
+    const field = { x: FIELD.x + FIELD.w / 2, y: FIELD.y + FIELD.h / 2 };
+    u.task = u.task || 'idle';
+    if (u.task === 'idle') {
+      if (walkStep(u, counterPos(), sp) && FIELD.t >= CROP_TIME) u.task = 'toField';
+      return;
+    }
+    if (u.task === 'toField') {
+      if (walkStep(u, field, sp)) { u.task = 'work'; u.workT = 0; }
+      return;
+    }
+    if (u.task === 'work') {
+      u.vx = 0; u.vy = 0; u.workT += dt;
+      u.f = Math.atan2(field.y - u.y, field.x - u.x);
+      if (u.workT >= 4) { FIELD.t = 0; u.carry = 3; u.task = 'toKitchen'; }
+      return;
+    }
+    if (u.task === 'toKitchen') {
+      if (walkStep(u, counterPos(), sp)) {
+        FOOD.stock = Math.min(10, FOOD.stock + u.carry);
+        addEffect(KITCHEN.x, KITCHEN.y - 50, '+' + u.carry + ' comida', '#ffd966');
+        u.carry = 0; u.task = 'idle';
       }
     }
+  }
+  function drawField(f) {
+    const ripe = f.t >= CROP_TIME, g = Math.min(1, f.t / CROP_TIME);
+    ctx.fillStyle = 'rgba(0,0,0,0.25)';
+    ctx.fillRect(f.x + 5, f.y + 6, f.w, f.h);
+    ctx.fillStyle = '#4a3018';
+    ctx.fillRect(f.x, f.y, f.w, f.h);
+    for (let row = 0; row < 5; row++) {
+      const y0 = f.y + 16 + row * 21;
+      ctx.fillStyle = '#3a2410'; ctx.fillRect(f.x + 3, y0 + 4, f.w - 6, 4);
+      ctx.fillStyle = '#5e4226'; ctx.fillRect(f.x + 3, y0 + 8, f.w - 6, 2);
+      for (let col = 0; col < 10; col++) {
+        const x = f.x + 10 + col * 19, h = 2 + g * 13;
+        ctx.strokeStyle = ripe ? '#c9a33a' : (g > 0.5 ? '#4f8a34' : '#6aa44a');
+        ctx.lineWidth = 1.8; ctx.lineCap = 'round';
+        ctx.beginPath(); ctx.moveTo(x, y0 + 6); ctx.lineTo(x, y0 + 6 - h); ctx.stroke();
+        if (g > 0.25) {
+          ctx.fillStyle = ripe ? '#d6b04a' : '#5e9e3e';
+          ctx.beginPath(); ctx.ellipse(x - 3, y0 + 6 - h * 0.5, 3, 1.4, -0.5, 0, TAU); ctx.fill();
+          ctx.beginPath(); ctx.ellipse(x + 3, y0 + 6 - h * 0.7, 3, 1.4, 0.5, 0, TAU); ctx.fill();
+        }
+        if (ripe) { ctx.fillStyle = '#f0d060'; ctx.beginPath(); ctx.ellipse(x, y0 - 2, 2, 3.5, 0, 0, TAU); ctx.fill(); }
+      }
+    }
+    ctx.strokeStyle = '#6b4a2b'; ctx.lineWidth = 2;
+    ctx.strokeRect(f.x + 0.5, f.y + 0.5, f.w - 1, f.h - 1);
+    for (let x = f.x; x <= f.x + f.w; x += 25) { ctx.fillStyle = '#7a5230'; ctx.fillRect(x - 2, f.y - 3, 4, 6); }
     if (!ripe) {
       ctx.fillStyle = '#ffd9a0'; ctx.font = 'bold 10px system-ui, sans-serif'; ctx.textAlign = 'center';
-      ctx.fillText('Creciendo ' + Math.ceil(60 - f.t) + ' s', f.x + f.w / 2, f.y - 6);
+      ctx.fillText('Creciendo ' + Math.ceil(CROP_TIME - f.t) + ' s', f.x + f.w / 2, f.y - 8);
       ctx.textAlign = 'left';
     }
   }
   function drawKitchen(k, t) {
-    if (!k.built) return;
-    ctx.fillStyle = 'rgba(0,0,0,0.3)'; ctx.fillRect(k.x - 22, k.y - 4, 50, 20);
-    ctx.fillStyle = '#7a5230'; ctx.fillRect(k.x - 24, k.y - 22, 48, 26);
-    ctx.fillStyle = '#5b3d24';
-    for (let x = k.x - 18; x < k.x + 24; x += 9) ctx.fillRect(x, k.y - 20, 1.5, 22);
-    ctx.fillStyle = '#8a6a3a';
-    ctx.beginPath(); ctx.moveTo(k.x - 30, k.y - 22); ctx.lineTo(k.x, k.y - 40); ctx.lineTo(k.x + 30, k.y - 22); ctx.closePath(); ctx.fill();
-    ctx.fillStyle = '#2a2a2a'; ctx.fillRect(k.x + 14, k.y - 46, 6, 14);
-    // olla sobre la lumbre
-    ctx.fillStyle = '#1e1e1e';
-    ctx.beginPath(); ctx.ellipse(k.x + 4, k.y + 20, 9, 5, 0, 0, TAU); ctx.fill();
-    ctx.strokeStyle = 'rgba(230,230,230,0.5)'; ctx.lineWidth = 1.5;
-    for (let i = 0; i < 2; i++) {
-      const sx = k.x + 2 + i * 5, sy = k.y + 10 - ((t * 20 + i * 9) % 14);
-      ctx.beginPath(); ctx.moveTo(sx, k.y + 12); ctx.quadraticCurveTo(sx + 3, sy + 4, sx, sy); ctx.stroke();
+    const x = k.x, y = k.y;
+    if (!k.built) {
+      ctx.fillStyle = '#6b5a3a';
+      ctx.beginPath(); ctx.ellipse(x, y + 4, 26, 10, 0, 0, TAU); ctx.fill();
+      ctx.fillStyle = '#8a7a52';
+      ctx.fillRect(x - 12, y - 2, 8, 6); ctx.fillRect(x + 4, y + 2, 9, 5);
+      return;
     }
+    ctx.fillStyle = 'rgba(0,0,0,0.3)'; ctx.fillRect(x - 26, y - 2, 56, 24);
+    // paredes de adobe con hiladas
+    ctx.fillStyle = '#b08a5a'; ctx.fillRect(x - 28, y - 22, 56, 26);
+    ctx.strokeStyle = '#7a5a34'; ctx.lineWidth = 1;
+    for (let r = -18; r < 2; r += 6) { ctx.beginPath(); ctx.moveTo(x - 28, y + r); ctx.lineTo(x + 28, y + r); ctx.stroke(); }
+    // puerta
+    ctx.fillStyle = '#4a2f18'; ctx.fillRect(x - 6, y - 10, 12, 14);
+    // techo de tejas a dos aguas
+    ctx.fillStyle = '#8c3a2a';
+    ctx.beginPath(); ctx.moveTo(x - 34, y - 20); ctx.lineTo(x, y - 42); ctx.lineTo(x + 34, y - 20); ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = '#5e2418'; ctx.lineWidth = 1;
+    for (let i = -2; i <= 2; i++) { ctx.beginPath(); ctx.moveTo(x + i * 8, y - 20); ctx.lineTo(x + i * 3, y - 40); ctx.stroke(); }
+    // chimenea con humo
+    ctx.fillStyle = '#6b4a2b'; ctx.fillRect(x + 16, y - 48, 7, 16);
+    for (let i = 0; i < 3; i++) {
+      const sy = y - 52 - ((t * 18 + i * 8) % 26);
+      ctx.fillStyle = 'rgba(210,210,210,' + (0.5 - i * 0.12) + ')';
+      ctx.beginPath(); ctx.arc(x + 19 + Math.sin(t + i) * 3, sy, 3 + i, 0, TAU); ctx.fill();
+    }
+    // estufa con fuego y olla
+    ctx.fillStyle = '#3a3a3a'; ctx.fillRect(x - 22, y - 14, 14, 10);
+    ctx.fillStyle = 'rgba(255,' + Math.round(120 + Math.sin(t * 12) * 30) + ',40,0.9)';
+    ctx.fillRect(x - 20, y - 10, 10, 4);
+    ctx.fillStyle = '#1e1e1e'; ctx.beginPath(); ctx.ellipse(x - 15, y - 16, 6, 3, 0, 0, TAU); ctx.fill();
+    // mesa frente a la cocina con sacos de grano y platos
+    ctx.fillStyle = '#6b4a2b'; ctx.fillRect(x + 4, y + 6, 26, 6);
+    ctx.fillStyle = '#e0c070';
+    ctx.beginPath(); ctx.ellipse(x + 9, y + 4, 4.5, 3.5, 0, 0, TAU); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(x + 20, y + 4, 4.5, 3.5, 0, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#d9d2c0'; ctx.beginPath(); ctx.ellipse(x + 26, y + 9, 3, 1.4, 0, 0, TAU); ctx.fill();
   }
-
+  
   function drawHay(x, y, s) {
     ctx.fillStyle = 'rgba(0,0,0,0.25)';
     ctx.beginPath(); ctx.ellipse(x + 2, y + 4, 12 * s, 4 * s, 0, 0, TAU); ctx.fill();
@@ -1158,6 +1224,7 @@
         u.blocking = u.blockT > 0;
         if (u.team === 'player' && u.mode !== 'attack') { if (!mealUpdate(u, dt)) guardThink(u, dt); }
         else if (u.team === 'enemy') enemyThink(u, dt);
+        else if (u.team === 'civ') farmThink(u, dt);
         else think(u, dt);
       }
 
@@ -1202,11 +1269,12 @@
   // ---------- Ataque, arco y flechas ----------
   function nearestEnemyDist(u) {
     let best = Infinity;
-    for (const e of units) if (e.team !== u.team && !e.dead) best = Math.min(best, Math.hypot(e.x - u.x, e.y - u.y));
+    for (const e of units) if (e.team !== u.team && e.team !== 'civ' && !e.dead) best = Math.min(best, Math.hypot(e.x - u.x, e.y - u.y));
     return best;
   }
 
   function fireArrow(u, spread) {
+    if (u.team === 'player' && !u.ctrl && !fireFree) return;
     const R = WEAPONS.bow.ranged;
     u.cd = WEAPONS.bow.cd;
     u.fireT = 0.25;
@@ -1251,7 +1319,7 @@
       a.x += a.vx * dt; a.y += a.vy * dt;
       let hit = false;
       for (const e of [...units, ...DUMMIES]) {
-        if (e.team === a.team || e.dead) continue;
+        if (e.team === a.team || e.team === 'civ' || e.dead) continue;
         if (Math.hypot(e.x - a.x, e.y - a.y) <= 14) { applyArrowHit(a, e); hit = true; break; }
       }
       const far = Math.hypot(a.x - a.sx, a.y - a.sy) > a.range;
@@ -1454,6 +1522,10 @@
       ctx.fillStyle = '#7a5230'; ctx.fillRect(-14, -1, 74 + ext, 2);
       ctx.fillStyle = '#cfd6de';
       ctx.beginPath(); ctx.moveTo(60 + ext, -3); ctx.lineTo(72 + ext, 0); ctx.lineTo(60 + ext, 3); ctx.fill();
+    } else if (kind === 'hoe') {
+      ctx.fillStyle = '#7a5230'; ctx.fillRect(-12, -1, 34, 2);
+      ctx.fillStyle = '#9aa3ad';
+      ctx.beginPath(); ctx.moveTo(20, -1); ctx.lineTo(28, -6); ctx.lineTo(29, -2); ctx.lineTo(22, 2); ctx.closePath(); ctx.fill();
     } else if (kind === 'bow') {
       const pull = u.fireT > 0 ? -2 : 3;
       ctx.strokeStyle = '#7a5230'; ctx.lineWidth = 2.5; ctx.lineCap = 'round';
@@ -1470,8 +1542,8 @@
 
   function drawUnit(u, t) {
     const isEnemy = u.team === 'enemy';
-    const tunic = u.flash > 0 ? '#f0e0a0' : (isEnemy ? '#a8322b' : '#2f6fb0');
-    const helmet = isEnemy ? '#5a5f66' : '#9aa3ad';
+    const tunic = u.flash > 0 ? '#f0e0a0' : (u.team === 'civ' ? '#8a6a3a' : isEnemy ? '#a8322b' : '#2f6fb0');
+    const helmet = u.team === 'civ' ? '#d9b050' : isEnemy ? '#5a5f66' : '#9aa3ad';
     if (u.mounted && !u.dead) drawHorseAt(u.x, u.y, u.f, t, !!(u.vx || u.vy));
     ctx.save();
     ctx.translate(u.x, u.y);
@@ -1588,6 +1660,7 @@
     if (/^[1-5]$/.test(k)) equip(RACK[Number(k) - 1]);
     else if (k === 'g') toggleRack();
     else if (k === 'm') toggleMount();
+    else if (k === 'f') toggleFire();
     else if (k === 'e') orderAttack();
     else if (k === 'r') orderDefend();
     else if (k === 'b') orderBase();
@@ -1741,6 +1814,7 @@
       } else if (act === 'squad') toggleSquad();
       else if (act === 'base') orderBase();
       else if (act === 'mount') toggleMount();
+      else if (act === 'fire') toggleFire();
       else if (act === 'rack') toggleRack();
       else if (act === 'zoom') { zoomIdx = (zoomIdx + 1) % ZOOMS.length; zoom = ZOOMS[zoomIdx]; clampCamera(); }
     });
@@ -1816,6 +1890,8 @@
     setSquadLabel();
     const rb = document.querySelector('#ring .b-rack');
     if (rb) rb.hidden = !canUseRack();
+    const fb = document.querySelector('#ring .b-fire');
+    if (fb) fb.textContent = fireFree ? 'Fuego: sí' : 'Fuego: no';
     const mb = document.querySelector('#ring .b-mount');
     if (mb) {
       const show = !!control && !control.dead && (control.mounted || nearHorse());
