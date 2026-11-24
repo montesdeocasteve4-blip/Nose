@@ -275,9 +275,9 @@
   const STABLE = { type: 'stable', x: 500, y: 380, w: 150, h: 60, sy: 440 };
   const SOLIDS = WALLS.concat([STABLE]);
   const PITS = [
-    { type: 'pit', x: 1500, y: 1040, r: 34, sy: 1040 },
-    { type: 'pit', x: 1512, y: 1100, r: 34, sy: 1100 },
-    { type: 'pit', x: 1500, y: 1160, r: 34, sy: 1160 }
+    { type: 'pit', x: 2300, y: 1180, r: 34, sy: 1180 },
+    { type: 'pit', x: 2335, y: 1280, r: 34, sy: 1280 },
+    { type: 'pit', x: 2290, y: 1380, r: 34, sy: 1380 }
   ];
   let horse = { type: 'horse', x: 575, y: 470, f: 0, moving: false, rider: null };
   // Puntos de guardia dentro de la muralla, uno por entrada
@@ -293,7 +293,7 @@
   const joy = { x: 0, y: 0, id: null };
   const keys = new Set();
   const cam = { x: 0, y: 0 };
-  let zoom = 1;
+  let zoom = 0.8;
 
   function makeUnit(team, weapon, x, y, f, mode) {
     return {
@@ -533,50 +533,140 @@
 
   function drawHorseAt(x, y, f, t, moving) {
     const flip = Math.cos(f) < 0 ? -1 : 1;
-    const g = moving ? Math.sin(t * 14) : 0;
+    const ph = moving ? t * 12 : 0;
+    const sw = k => Math.sin(ph + k) * (moving ? 1 : 0);
     ctx.save();
     ctx.translate(x, y);
-    ctx.scale(1.2 * flip, 1.2);
+    ctx.scale(1.3 * flip, 1.3);
     ctx.fillStyle = 'rgba(0,0,0,0.3)';
-    ctx.beginPath(); ctx.ellipse(0, 2, 24, 7, 0, 0, TAU); ctx.fill();
-    // patas, en galope cuando se mueve
-    ctx.strokeStyle = '#3f2614'; ctx.lineWidth = 3.2; ctx.lineCap = 'round';
-    for (const [lx, off] of [[-14, -g * 4], [-9, g * 4], [10, g * 4], [16, -g * 4]]) {
-      ctx.beginPath(); ctx.moveTo(lx, -6); ctx.lineTo(lx + off, 4); ctx.stroke();
+    ctx.beginPath(); ctx.ellipse(0, 2, 30, 8, 0, 0, TAU); ctx.fill();
+    ctx.lineCap = 'round';
+    // cola al viento
+    ctx.strokeStyle = '#4a2c14'; ctx.lineWidth = 4;
+    ctx.beginPath(); ctx.moveTo(-25, -20); ctx.quadraticCurveTo(-40, -16, -38 + sw(0) * 2, -4); ctx.stroke();
+    ctx.strokeStyle = '#2b1a0c'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(-27, -19); ctx.quadraticCurveTo(-41, -14, -39 + sw(0) * 2, -3); ctx.stroke();
+    // patas traseras y delanteras en galope (pares alternados)
+    const legs = [[-17, 0], [-11, Math.PI], [13, Math.PI], [19, 0]];
+    for (const [lx, p] of legs) {
+      const s = Math.sin(ph + p) * (moving ? 4 : 0);
+      const kx = lx + s * 0.5, ky = -7 - Math.abs(Math.cos(ph + p)) * (moving ? 2 : 0);
+      ctx.strokeStyle = '#6a4220'; ctx.lineWidth = 3.4;
+      ctx.beginPath(); ctx.moveTo(lx, -14); ctx.lineTo(kx, ky); ctx.lineTo(lx + s, 0); ctx.stroke();
+      ctx.fillStyle = '#1e120a';
+      ctx.fillRect(lx + s - 2.6, -1, 5.2, 3);
     }
-    // cola
-    ctx.strokeStyle = '#3f2614'; ctx.lineWidth = 2.5;
-    ctx.beginPath(); ctx.moveTo(-20, -14); ctx.quadraticCurveTo(-30, -10, -27 + g, -2); ctx.stroke();
-    // cuerpo, cuello y cabeza
-    ctx.fillStyle = '#8a5a2b';
-    ctx.beginPath(); ctx.ellipse(0, -12, 19, 8.5, 0, 0, TAU); ctx.fill();
+    // cuerpo con sombra de vientre y grupa
+    ctx.fillStyle = '#8b5a2b';
+    ctx.beginPath(); ctx.ellipse(0, -18, 24, 10, 0, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#6a4220';
+    ctx.beginPath(); ctx.ellipse(0, -13, 20, 4.5, 0, 0, TAU); ctx.fill();
+    ctx.fillStyle = 'rgba(40,20,5,0.2)';
+    ctx.beginPath(); ctx.ellipse(-9, -19, 9, 7, 0, 0, TAU); ctx.fill();
+    // cuello y cabeza
+    ctx.fillStyle = '#8b5a2b';
     ctx.beginPath();
-    ctx.moveTo(10, -16); ctx.lineTo(20, -32); ctx.lineTo(27, -30); ctx.lineTo(16, -10); ctx.closePath(); ctx.fill();
-    ctx.beginPath(); ctx.ellipse(26, -31, 6.5, 4.5, -0.5, 0, TAU); ctx.fill();
-    // crin y ojo
-    ctx.strokeStyle = '#2b1a0c'; ctx.lineWidth = 3;
-    ctx.beginPath(); ctx.moveTo(12, -17); ctx.lineTo(19, -33); ctx.stroke();
+    ctx.moveTo(12, -24); ctx.quadraticCurveTo(22, -36, 28, -46); ctx.lineTo(37, -41);
+    ctx.quadraticCurveTo(26, -26, 16, -12); ctx.closePath(); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(36, -42, 8.5, 5.8, -0.55, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#c49a68';
+    ctx.beginPath(); ctx.ellipse(42.5, -37.5, 4.2, 3.4, -0.55, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#3b2412';
+    ctx.beginPath(); ctx.arc(44.5, -38.5, 0.9, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#f2ead8';
+    ctx.beginPath(); ctx.ellipse(38, -44, 1.6, 3.4, -0.55, 0, TAU); ctx.fill();
+    ctx.beginPath(); ctx.arc(35, -46.5, 1.8, 0, TAU); ctx.fill();
     ctx.fillStyle = '#120a04';
-    ctx.beginPath(); ctx.arc(28, -32, 1, 0, TAU); ctx.fill();
-    // silla si hay jinete
-    if (horse.rider) { ctx.fillStyle = '#5b3d24'; ctx.fillRect(-7, -22, 14, 4); }
+    ctx.beginPath(); ctx.arc(35.4, -46.5, 1, 0, TAU); ctx.fill();
+    // orejas
+    ctx.fillStyle = '#6a4220';
+    ctx.beginPath(); ctx.moveTo(30, -50); ctx.lineTo(31.5, -57); ctx.lineTo(34, -50); ctx.closePath(); ctx.fill();
+    // crin ondulada a lo largo del cuello
+    ctx.strokeStyle = '#2b1a0c'; ctx.lineWidth = 2.4;
+    for (let i = 0; i < 5; i++) {
+      const bx = 15 + i * 3.6, by = -24 - i * 4.6;
+      ctx.beginPath(); ctx.moveTo(bx, by);
+      ctx.quadraticCurveTo(bx - 3 + sw(i) * 1.5, by - 2, bx - 5 + sw(i) * 2, by - 4); ctx.stroke();
+    }
+    // manta y silla si hay jinete
+    if (horse.rider) {
+      ctx.fillStyle = '#b8322b';
+      ctx.beginPath(); ctx.moveTo(-9, -27); ctx.lineTo(14, -27); ctx.lineTo(11, -17); ctx.lineTo(-7, -17); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = '#ffd966'; ctx.fillRect(-9, -27.6, 23, 1.2);
+      ctx.fillStyle = '#5b3d24';
+      ctx.beginPath(); ctx.ellipse(2, -30, 10, 3.2, 0, 0, TAU); ctx.fill();
+      ctx.strokeStyle = '#c9a227'; ctx.lineWidth = 1.3;
+      ctx.beginPath(); ctx.moveTo(4, -28); ctx.lineTo(4, -17); ctx.stroke();
+    }
     ctx.restore();
   }
 
+  function drawHay(x, y, s) {
+    ctx.fillStyle = 'rgba(0,0,0,0.25)';
+    ctx.beginPath(); ctx.ellipse(x + 2, y + 4, 12 * s, 4 * s, 0, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#e0b84a';
+    ctx.beginPath(); ctx.ellipse(x, y, 12 * s, 8 * s, 0, 0, TAU); ctx.fill();
+    ctx.strokeStyle = '#a57d25'; ctx.lineWidth = 1;
+    for (let i = -4; i <= 4; i++) {
+      ctx.beginPath(); ctx.moveTo(x + i * 2.4 * s, y - 6 * s); ctx.lineTo(x + i * 2.4 * s + 2, y + 6 * s); ctx.stroke();
+    }
+    ctx.strokeStyle = '#7a5a1a'; ctx.lineWidth = 1.2;
+    ctx.beginPath(); ctx.ellipse(x, y, 12 * s, 8 * s, 0, 0, TAU); ctx.stroke();
+  }
+
   function drawStable(s) {
+    const { x, y, w, h } = s;
+    // sombra
     ctx.fillStyle = 'rgba(0,0,0,0.3)';
-    ctx.fillRect(s.x + 4, s.y + 8, s.w, s.h);
-    ctx.fillStyle = '#7a5230';
-    ctx.fillRect(s.x, s.y, s.w, s.h);
-    ctx.fillStyle = '#5b3d24';
-    for (let x = s.x + 10; x < s.x + s.w; x += 14) ctx.fillRect(x, s.y + 4, 2, s.h - 8);
-    // techo de paja
-    ctx.fillStyle = '#b08d4a';
-    ctx.fillRect(s.x - 6, s.y - 10, s.w + 12, 16);
-    ctx.strokeStyle = '#4a3418'; ctx.lineWidth = 1;
-    ctx.strokeRect(s.x - 5.5, s.y - 9.5, s.w + 11, 15);
-    ctx.fillStyle = '#ffd966'; ctx.font = 'bold 10px system-ui, sans-serif'; ctx.textAlign = 'center';
-    ctx.fillText('ESTABLO', s.x + s.w / 2, s.y - 14);
+    ctx.fillRect(x + 6, y + 10, w + 10, h + 6);
+    // paja en el suelo del establo
+    ctx.fillStyle = '#d9b050';
+    ctx.fillRect(x + 4, y + 36, w - 8, 20);
+    ctx.strokeStyle = '#a57d25'; ctx.lineWidth = 1;
+    for (let i = 0; i < 16; i++) {
+      const sx = x + 8 + (i * 9) % (w - 16);
+      ctx.beginPath(); ctx.moveTo(sx, y + 38 + (i % 3) * 5); ctx.lineTo(sx + 5, y + 40 + (i % 3) * 5); ctx.stroke();
+    }
+    // paredes de tablones
+    ctx.fillStyle = '#6e4a2a';
+    ctx.fillRect(x, y + 6, w, h - 6);
+    ctx.fillStyle = '#4a2f18';
+    for (let i = x + 8; i < x + w; i += 13) ctx.fillRect(i, y + 8, 1.6, h - 10);
+    ctx.fillRect(x, y + 6, w, 2);
+    // postes de esquina
+    ctx.fillStyle = '#4a2f18';
+    ctx.fillRect(x - 3, y + 4, 7, h);
+    ctx.fillRect(x + w - 4, y + 4, 7, h);
+    // farol
+    ctx.fillStyle = 'rgba(255,200,90,0.35)';
+    ctx.beginPath(); ctx.arc(x + 4, y + 20, 9, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#ffd966';
+    ctx.beginPath(); ctx.arc(x + 4, y + 20, 3, 0, TAU); ctx.fill();
+    // techo de paja a dos aguas
+    ctx.fillStyle = '#c9a24a';
+    ctx.beginPath();
+    ctx.moveTo(x - 14, y + 8); ctx.lineTo(x + w / 2, y - 20); ctx.lineTo(x + w + 14, y + 8); ctx.closePath(); ctx.fill();
+    ctx.save();
+    ctx.clip();
+    ctx.strokeStyle = '#8c6a2a'; ctx.lineWidth = 1.2;
+    for (let i = -20; i < w + 30; i += 6) {
+      ctx.beginPath(); ctx.moveTo(x + i, y + 10); ctx.lineTo(x + i + 7, y - 24); ctx.stroke();
+    }
+    ctx.restore();
+    // cumbrera y alero oscuro
+    ctx.strokeStyle = '#6e4f1c'; ctx.lineWidth = 2.5;
+    ctx.beginPath(); ctx.moveTo(x + w / 2, y - 20); ctx.lineTo(x + w / 2, y - 22); ctx.stroke();
+    ctx.fillStyle = '#9a7430';
+    ctx.fillRect(x - 14, y + 4, w + 28, 5);
+    // heno apilado a un lado
+    drawHay(x + w + 22, y + 52, 1);
+    drawHay(x + w + 34, y + 60, 0.85);
+    drawHay(x - 20, y + 56, 0.9);
+    // letrero
+    ctx.fillStyle = '#ffd966';
+    ctx.font = 'bold 10px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('ESTABLO', x + w / 2, y - 26);
     ctx.textAlign = 'left';
   }
 
@@ -965,18 +1055,22 @@
 
     const flip = Math.cos(u.f) < 0 ? -1 : 1;
     ctx.scale(1.3 * flip, 1.3);
-    if (u.mounted) ctx.translate(0, -12);
+    if (u.mounted) ctx.translate(0, -14);
     const moving = u.vx || u.vy;
     const bob = moving ? 0 : Math.sin(t * 2 + u.x) * 0.5;
     const st = moving ? Math.sin(u.walkT) * 2 : 0;
 
-    ctx.fillStyle = 'rgba(0,0,0,0.3)';
-    ctx.beginPath(); ctx.ellipse(0, 1, 11, 4.5, 0, 0, TAU); ctx.fill();
+    if (!u.mounted) {
+      ctx.fillStyle = 'rgba(0,0,0,0.3)';
+      ctx.beginPath(); ctx.ellipse(0, 1, 11, 4.5, 0, 0, TAU); ctx.fill();
+    }
 
     // piernas
     ctx.fillStyle = '#4a3a2a';
-    ctx.fillRect(-5 + st, -14, 4.5, 14);
-    ctx.fillRect(0.5 - st, -14, 4.5, 14);
+    if (!u.mounted) {
+      ctx.fillRect(-5 + st, -14, 4.5, 14);
+      ctx.fillRect(0.5 - st, -14, 4.5, 14);
+    }
 
     // brazo trasero
     ctx.strokeStyle = tunic; ctx.lineWidth = 4; ctx.lineCap = 'round';
@@ -1161,7 +1255,7 @@
   const joyZone = document.getElementById('joyzone');
   const joyEl = document.getElementById('joy'), knob = document.getElementById('knob');
   const JOY_R = 70;
-  const ZOOMS = [1, 1.5, 0.75];
+  const ZOOMS = [0.8, 1.2, 0.6];
   let zoomIdx = 0;
   let joyCx = 0, joyCy = 0;
 
