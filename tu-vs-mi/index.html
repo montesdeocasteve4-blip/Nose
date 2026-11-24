@@ -3,14 +3,17 @@
   html, body { margin: 0; height: 100%; background: #1d2b14; overflow: hidden; font-family: system-ui, sans-serif; user-select: none; }
   canvas { display: block; width: 100%; height: 100%; cursor: crosshair; touch-action: none; }
   #hud { position: fixed; left: 12px; top: 10px; color: #eef5e0; background: rgba(0,0,0,.45);
-         padding: 8px 12px; border-radius: 8px; font-size: 13px; line-height: 1.55; pointer-events: none; max-width: 80vw; }
+         padding: 8px 12px; border-radius: 8px; font-size: 13px; line-height: 1.55; pointer-events: none; max-width: calc(100vw - 230px); }
   #hud b { color: #ffd966; }
   #over { position: fixed; inset: 0; display: none; flex-direction: column; align-items: center; justify-content: center;
           background: rgba(0,0,0,.5); color: #fff; font-size: 44px; font-weight: 700; cursor: pointer; }
   #over small { font-size: 16px; font-weight: 400; margin-top: 10px; }
   #touch { display: none; }
   body.touch #touch { display: block; }
-  body.touch #hud { top: max(10px, env(safe-area-inset-top, 0px)); left: max(10px, env(safe-area-inset-left, 0px)); font-size: 12px; max-width: 92vw; }
+  body.touch #hud { top: max(10px, env(safe-area-inset-top, 0px)); left: max(10px, env(safe-area-inset-left, 0px)); font-size: 12px; max-width: calc(100vw - 150px); }
+  #mini { position: fixed; top: max(10px, env(safe-area-inset-top, 0px)); right: max(10px, env(safe-area-inset-right, 0px));
+          width: 180px; height: 124px; border: 2px solid rgba(255,255,255,.55); border-radius: 8px; background: #1d2b14; pointer-events: none; }
+  body.touch #mini { width: 120px; height: 83px; }
   body.touch .keyhelp { display: none; }
   body:not(.touch) .touchhelp { display: none; }
   #touch button { font: inherit; font-size: 12px; font-weight: 600; color: #fff; background: rgba(20,30,15,.6);
@@ -28,8 +31,10 @@
             display: flex; gap: 10px; align-items: flex-end; }
   #touch .big { width: 96px; height: 96px; border-radius: 50%; font-size: 16px; background: rgba(168,50,43,.85); }
   #touch .side { width: 84px; height: 84px; border-radius: 50%; }
+  body.touch #mini { top: max(10px, env(safe-area-inset-top, 0px)); }
 </style>
 <canvas id="c"></canvas>
+<canvas id="mini" width="180" height="124"></canvas>
 <div id="hud"></div>
 <div id="touch">
   <div id="joy"><div id="knob"></div></div>
@@ -63,19 +68,23 @@
   const angDiff = (a, b) => ((a - b + Math.PI) % TAU + TAU) % TAU - Math.PI;
 
   // ---------- Claros de spawn: orilla izquierda y esquina opuesta ----------
+  // Fogata: cura a tu escuadra si está dentro del radio HEAL_R
+  const FIRE = { type: 'fire', x: 600, y: WORLD_H / 2, r: 14 };
+  const HEAL_R = 200, HEAL_RATE = 10;
   const CLEARINGS = [
     { x: 260, y: WORLD_H / 2, r: 260 },
-    { x: WORLD_W - 300, y: WORLD_H - 300, r: 260 }
+    { x: WORLD_W - 300, y: WORLD_H - 300, r: 260 },
+    { x: FIRE.x, y: FIRE.y, r: 120 }
   ];
   const inClearing = (x, y, pad) => CLEARINGS.some(c => Math.hypot(x - c.x, y - c.y) < c.r + pad);
 
   // ---------- Armas que un humano puede cargar ----------
   // a0 = ángulo de reposo, swing = duración del golpe (s), reach = alcance (px)
   const WEAPONS = {
-    sword:      { name: 'Espada',    reach: 44, dmg: 20, cd: 0.8, swing: 0.35, speed: 90, shield: true,  a0: -1.1 },
-    spear:      { name: 'Lanza',     reach: 70, dmg: 16, cd: 1.0, swing: 0.45, speed: 80, shield: false, a0: -0.1 },
-    axe:        { name: 'Hacha',     reach: 40, dmg: 24, cd: 1.1, swing: 0.5,  speed: 82, shield: true,  a0: -1.0 },
-    greatsword: { name: 'Espadón',   reach: 52, dmg: 30, cd: 1.4, swing: 0.55, speed: 72, shield: false, a0: -1.0 }
+    sword:      { name: 'Espada',    reach: 44, dmg: 20, cd: 0.8, swing: 0.35, speed: 112, shield: true,  a0: -1.1 },
+    spear:      { name: 'Lanza',     reach: 70, dmg: 16, cd: 1.0, swing: 0.45, speed: 100, shield: false, a0: -0.1 },
+    axe:        { name: 'Hacha',     reach: 40, dmg: 24, cd: 1.1, swing: 0.5,  speed: 102, shield: true,  a0: -1.0 },
+    greatsword: { name: 'Espadón',   reach: 52, dmg: 30, cd: 1.4, swing: 0.55, speed: 90,  shield: false, a0: -1.0 }
   };
 
   // ---------- Decoración del bosque ----------
@@ -96,6 +105,8 @@
       bushes.push(b); decor.push(b);
     }
   }
+
+  decor.push(FIRE);
 
   // ---------- Suelo pre-renderizado ----------
   const ground = document.createElement('canvas');
@@ -238,8 +249,9 @@
     const facingAttacker = Math.abs(angDiff(toAttacker, e.f)) < 1.6;
     let dmg = w.dmg;
     if (e.blocking && facingAttacker) {
-      if (e.shield) { dmg = w.dmg * 0.05; addEffect(e.x, e.y - 50, 'BLOQUEADO', '#7fd3ff'); }
-      else          { dmg = w.dmg * 0.5;  addEffect(e.x, e.y - 50, 'PARADA', '#7fd3ff'); }
+      // El escudo bloquea 60% del daño; sin escudo, parar con el arma bloquea 30%
+      dmg = w.dmg * (e.shield ? 0.4 : 0.7);
+      addEffect(e.x, e.y - 50, (e.shield ? 'ESCUDO -' : 'PARADA -') + Math.round(dmg), '#7fd3ff');
     } else {
       addEffect(e.x, e.y - 50, '-' + Math.round(dmg), '#ff6b6b');
     }
@@ -274,7 +286,7 @@
           const d = Math.hypot(p.x - u.x, p.y - u.y);
           if (d < nd) { nd = d; near = p; }
         }
-        if (near && nd > 1) { u.vx = (near.x - u.x) / nd * 55; u.vy = (near.y - u.y) / nd * 55; }
+        if (near && nd > 1) { u.vx = (near.x - u.x) / nd * 70; u.vy = (near.y - u.y) / nd * 70; }
       }
       return;
     }
@@ -356,6 +368,13 @@
     }
   }
 
+  function healNearFire(dt) {
+    for (const u of player) {
+      if (u.dead || u.hp >= 100) continue;
+      if (Math.hypot(u.x - FIRE.x, u.y - FIRE.y) <= HEAL_R) u.hp = Math.min(100, u.hp + HEAL_RATE * dt);
+    }
+  }
+
   function checkEnd() {
     if (control.dead) {
       const alive = player.find(p => !p.dead);
@@ -369,6 +388,26 @@
         over.style.display = 'flex';
       }
     }
+  }
+
+  // ---------- Dibujo de la fogata ----------
+  function drawFire(f, t) {
+    const { x, y } = f;
+    ctx.strokeStyle = 'rgba(255,200,90,0.35)'; ctx.lineWidth = 2; ctx.setLineDash([6, 6]);
+    ctx.beginPath(); ctx.arc(x, y, HEAL_R, 0, TAU); ctx.stroke(); ctx.setLineDash([]);
+    ctx.fillStyle = 'rgba(255,170,60,0.12)';
+    ctx.beginPath(); ctx.arc(x, y - 8, 60, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#3b2a1a';
+    ctx.beginPath(); ctx.ellipse(x, y + 2, 14, 6, 0, 0, TAU); ctx.fill();
+    ctx.strokeStyle = '#6b4a2b'; ctx.lineWidth = 4; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(x - 10, y + 1); ctx.lineTo(x + 10, y - 3); ctx.moveTo(x + 10, y + 1); ctx.lineTo(x - 10, y - 3); ctx.stroke();
+    const f1 = 1 + Math.sin(t * 9) * 0.12, f2 = 1 + Math.sin(t * 13 + 1) * 0.1;
+    ctx.fillStyle = '#ff9f1c';
+    ctx.beginPath(); ctx.moveTo(x - 9, y - 2); ctx.quadraticCurveTo(x - 6, y - 24 * f1, x, y - 30 * f1);
+    ctx.quadraticCurveTo(x + 6, y - 22 * f2, x + 9, y - 2); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#ffd166';
+    ctx.beginPath(); ctx.moveTo(x - 5, y - 2); ctx.quadraticCurveTo(x - 3, y - 14 * f2, x, y - 18 * f2);
+    ctx.quadraticCurveTo(x + 3, y - 12 * f1, x + 5, y - 2); ctx.closePath(); ctx.fill();
   }
 
   // ---------- Dibujo de unidades ----------
@@ -627,6 +666,7 @@
     for (const it of items) {
       if (it.type === 'tree') drawTree(it);
       else if (it.type === 'bush') drawBush(it);
+      else if (it.type === 'fire') drawFire(it, t);
       else drawUnit(it, t);
     }
 
@@ -652,6 +692,52 @@
       `<span class="touchhelp">Joystick: mover · Botones: atacar, defender y órdenes a tu escuadra</span>`;
   }
 
+  // ---------- Mini mapa ----------
+  const mini = document.getElementById('mini');
+  const mctx = mini.getContext('2d');
+  const MW = mini.width, MH = mini.height;
+  const msx = MW / WORLD_W, msy = MH / WORLD_H;
+  const miniBg = document.createElement('canvas');
+  miniBg.width = MW; miniBg.height = MH;
+  (function buildMiniBg() {
+    const g = miniBg.getContext('2d');
+    g.fillStyle = '#43702c'; g.fillRect(0, 0, MW, MH);
+    for (const c of CLEARINGS) {
+      g.fillStyle = '#8a7a4c';
+      g.beginPath(); g.arc(c.x * msx, c.y * msy, c.r * msx, 0, TAU); g.fill();
+    }
+    for (const d of decor) {
+      if (d.type === 'tree') {
+        g.fillStyle = '#1f4d1c'; g.beginPath(); g.arc(d.x * msx, d.y * msy, Math.max(1, d.r * msx * 1.1), 0, TAU); g.fill();
+      } else if (d.type === 'bush') {
+        g.fillStyle = '#4a9a3a'; g.beginPath(); g.arc(d.x * msx, d.y * msy, Math.max(0.8, d.r * msx * 0.9), 0, TAU); g.fill();
+      }
+    }
+  })();
+
+  function renderMini() {
+    mctx.drawImage(miniBg, 0, 0);
+    mctx.fillStyle = '#ff9f1c';
+    mctx.beginPath(); mctx.arc(FIRE.x * msx, FIRE.y * msy, 3, 0, TAU); mctx.fill();
+    for (const u of units) {
+      const px = u.x * msx, py = u.y * msy;
+      if (u.dead) {
+        mctx.fillStyle = '#888'; mctx.beginPath(); mctx.arc(px, py, 2, 0, TAU); mctx.fill();
+        continue;
+      }
+      mctx.fillStyle = u.team === 'enemy' ? '#ff4d4d' : '#4da6ff';
+      mctx.beginPath(); mctx.arc(px, py, 3.2, 0, TAU); mctx.fill();
+      if (u.ctrl) {
+        mctx.strokeStyle = '#ffd966'; mctx.lineWidth = 1.5;
+        mctx.beginPath(); mctx.arc(px, py, 6, 0, TAU); mctx.stroke();
+      }
+    }
+    // Rectángulo de lo que se ve en pantalla
+    const vw = W / zoom * msx, vh = H / zoom * msy;
+    mctx.strokeStyle = 'rgba(255,255,255,0.85)'; mctx.lineWidth = 1;
+    mctx.strokeRect(cam.x * msx - vw / 2, cam.y * msy - vh / 2, vw, vh);
+  }
+
   // ---------- Bucle ----------
   let last = performance.now(), hudT = 0;
   function frame(now) {
@@ -659,6 +745,7 @@
     last = now;
     if (!ended) {
       updateUnits(dt);
+      healNearFire(dt);
       for (const e of effects) e.t += dt;
       for (let i = effects.length - 1; i >= 0; i--) if (effects[i].t > 0.9) effects.splice(i, 1);
       checkEnd();
@@ -669,6 +756,7 @@
     }
     clampCamera();
     render(now / 1000);
+    renderMini();
     hudT += dt;
     if (hudT > 0.15) { hudT = 0; updateHud(); }
     requestAnimationFrame(frame);
