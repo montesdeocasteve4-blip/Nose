@@ -298,7 +298,7 @@
   }
 
   // ---------- Unidades ----------
-  const SPAWN_PLAYER = ['sword', 'bow', 'spear', 'axe', 'greatsword', 'sword', 'spear', 'knife'];
+  const SPAWN_PLAYER = ['sword', 'bow', 'spear', 'axe', 'greatsword', 'sword', 'spear', 'knife', 'spear'];
   const SPAWN_ENEMY  = ['sword', 'spear', 'axe', 'sword', 'greatsword', 'bow', 'spear', 'bow'];
   const ENEMY_POS = [[3270, 1830], [3330, 1885], [3270, 1940], [3330, 1995], [3270, 2050], [3330, 1830], [3270, 2110], [3330, 2110]];
 
@@ -396,6 +396,7 @@
     player = SPAWN_PLAYER.map((w, i) => makeUnit('player', w, 800, 1100 + (i - 3) * 110, 0, 'base'));
     player.forEach((p, i) => { p.slot = i; p.healer = p.weapon === 'knife'; p.post = -1; p.tower = false; p.towerRole = null; });
     player[1].tower = true; // el arquero de la torre
+    player[8].tower = true; // su compañero de torre: vigila y baja a comer cuando el otro está arriba
     towerMode = 'none';
     alert = { active: false, phase: 'idle', caller: null, t: 0 };
     horse = { type: 'horse', x: 575, y: 470, f: 0, moving: false, rider: null };
@@ -542,12 +543,15 @@
     addEffect(TOWER.x, TOWER.y - 60, mode === 'one' ? '¡Un enemigo!' : '¡Ataque!', '#ff6b6b');
   }
   function towerThink(u, dt) {
-    if (mealUpdate(u, dt)) return;
+    // Solo baja a comer si su compañero de torre está arriba; si no, espera a que vuelva
+    const partner = player.find(q => q !== u && q.tower && !q.dead);
+    const partnerBusy = partner && partner.meal && partner.meal.state !== 'idle';
+    if ((u.meal && u.meal.state !== 'idle') || !partnerBusy) { if (mealUpdate(u, dt)) return; }
     const e = nearestEnemy(u);
     if (e) {
       const d = Math.hypot(e.x - u.x, e.y - u.y);
       u.f = Math.atan2(e.y - u.y, e.x - u.x);
-      if (d <= WEAPONS.bow.ranged.range && u.cd <= 0) fireArrow(u, 0.05);
+      if (u.weapon === 'bow' && d <= WEAPONS.bow.ranged.range && u.cd <= 0) fireArrow(u, 0.05);
     }
     const dx = TOWER_HOLD.x - u.x, dy = TOWER_HOLD.y - u.y, d = Math.hypot(dx, dy);
     if (d > 10) { const sp = WEAPONS.bow.speed * 0.8; u.vx = dx / d * sp; u.vy = dy / d * sp; }
