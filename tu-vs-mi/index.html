@@ -333,7 +333,8 @@
     player = SPAWN_PLAYER.map((w, i) => makeUnit('player', w, 800, 1100 + (i - 3) * 110, 0, 'base'));
     alert = { active: false, phase: 'idle', caller: null, t: 0 };
     horse = { type: 'horse', x: 575, y: 470, f: 0, moving: false, rider: null };
-    enemy = SPAWN_ENEMY.map((w, i) => makeUnit('enemy', w, ENEMY_POS[i][0], ENEMY_POS[i][1], Math.PI, 'attack'));
+    enemyWave = false; enemyTimer = 0;
+    enemy =SPAWN_ENEMY.map((w, i) => makeUnit('enemy', w, ENEMY_POS[i][0], ENEMY_POS[i][1], Math.PI, 'attack'));
     units = [...player, ...enemy];
     effects = [];
     arrows = [];
@@ -382,6 +383,13 @@
   }
 
   function findTarget(u) {
+    if (u.team === 'enemy') {
+      let low = null, lh = Infinity;
+      for (const e of units) {
+        if (e.team === 'player' && !e.dead && Math.hypot(e.x - u.x, e.y - u.y) < 400 && e.hp < lh) { lh = e.hp; low = e; }
+      }
+      if (low) return low;
+    }
     const engaging = alert.active && alert.phase === 'engage';
     const limit = u.team === 'enemy' ? 700 : (u.mode === 'attack' || engaging ? Infinity : 300);
     let best = null, bd = limit;
@@ -742,6 +750,10 @@
   const CATA = { type: 'cata', x: 3180, y: 1960, sy: 1985, cd: 3, fire: 0 };
   const CAMP_FIRE = { type: 'campfire', x: 3262, y: 2010, sy: 2020 };
   const BOULDERS = [];
+  // Táctica enemiga: esperan en su campamento y atacan en grupo cuando tú te acercas
+  // o pasan 20 s; eligen al soldado tuyo más herido y se retiran si quedan con poca vida
+  const CAMP_HOLD = { x: 3250, y: 1860 };
+  let enemyWave = false, enemyTimer = 0;
   // La catapulta dispara a tu soldado más cercano en 700 px; la piedra cae con 30 de daño en 45 px
   function updateCamp(dt) {
     CATA.cd -= dt;
@@ -930,6 +942,38 @@
     }
   }
 
+  function nearestPlayerDist(u) {
+    let best = Infinity;
+    for (const p of units) if (p.team === 'player' && !p.dead) best = Math.min(best, Math.hypot(p.x - u.x, p.y - u.y));
+    return best;
+  }
+  function enemyThink(u, dt) {
+    const aliveE = enemy.filter(e => !e.dead).length;
+    enemyTimer += dt;
+    if (!enemyWave) {
+      const pc = units.some(p => p.team === 'player' && !p.dead && Math.hypot(p.x - CAMP_HOLD.x, p.y - CAMP_HOLD.y) < 700);
+      if (pc || enemyTimer > 20) { enemyWave = true; enemyTimer = 0; }
+    } else if (aliveE <= 1) {
+      enemyWave = false; enemyTimer = 0;
+    }
+    // Con poca vida se retiran al campamento
+    if (enemyWave && u.hp < 25) {
+      const dx = CAMP_HOLD.x - u.x, dy = CAMP_HOLD.y - u.y, d = Math.hypot(dx, dy) || 1;
+      u.vx = dx / d * 60; u.vy = dy / d * 60;
+      return;
+    }
+    if (!enemyWave) {
+      // Esperan formados en el campamento; si tu escuadra llega, responden
+      if (nearestPlayerDist(u) < 260) { think(u, dt); return; }
+      const idx = Math.max(0, enemy.indexOf(u));
+      const hx = CAMP_HOLD.x + (idx - 2) * 40, hy = CAMP_HOLD.y;
+      const dx = hx - u.x, dy = hy - u.y, d = Math.hypot(dx, dy);
+      if (d > 6) { u.vx = dx / d * 60; u.vy = dy / d * 60; }
+      return;
+    }
+    think(u, dt);
+  }
+
   function updateUnits(dt) {
     updateAlert(dt);
     updateHorse();
@@ -972,6 +1016,7 @@
       } else {
         u.blocking = u.blockT > 0;
         if (u.team === 'player' && u.mode !== 'attack') guardThink(u, dt);
+        else if (u.team === 'enemy') enemyThink(u, dt);
         else think(u, dt);
       }
 
