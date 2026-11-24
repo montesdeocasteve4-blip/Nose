@@ -314,8 +314,8 @@
   const DETECT_R = 240, GATHER_R = 120, ALERT_R = 360;
   // Establo (su techo bloquea), trampas de estacas frente a la entrada del frente, y el caballo
   const STABLE = { type: 'stable', x: 500, y: 380, w: 150, h: 60, sy: 440 };
-  // Herrería dentro de la muralla: el herrero da +2 de daño a tu arma durante 30 s (cuesta una ración)
-  const FORGE = { type: 'forge', x: 860, y: 470, w: 120, h: 70, sy: 540 };
+  // Herrería dentro de la muralla, justo debajo del establo: el herrero da +2 de daño a tu arma durante 45 s (cuesta una ración)
+  const FORGE = { type: 'forge', x: 500, y: 520, w: 120, h: 70, sy: 590 };
   const SOLIDS = WALLS.concat([STABLE, FORGE]);
   // Grafo de navegación: esquinas de los obstáculos con margen (radio de la unidad + holgura)
   const NAV_M = 14;
@@ -714,14 +714,14 @@
     horse.y = u.y + Math.sin(u.f + Math.PI / 2) * 26;
     horse.moving = false;
   }
-  // Herrero: +2 de daño a tu arma durante 30 s a cambio de una ración de comida
+  // Herrero: +2 de daño a tu arma durante 45 s a cambio de una ración de comida
   function useForge() {
     if (!control || control.dead || ended) return;
     const fx = FORGE.x + FORGE.w / 2, fy = FORGE.y + FORGE.h / 2;
     if (Math.hypot(control.x - fx, control.y - fy) > 120) { addEffect(control.x, control.y - 60, 'Ve a la herrería', '#ffd966'); return; }
     if (FOOD.stock <= 0) { addEffect(control.x, control.y - 60, 'Sin comida', '#ff9a6a'); return; }
     FOOD.stock--;
-    control.forgeT = 30;
+    control.forgeT = 45;
     addEffect(control.x, control.y - 60, '¡Arma +2 daño!', '#ffd966');
   }
   function toggleMount() {
@@ -1026,43 +1026,92 @@
     ctx.fillStyle = '#b8322b';
     ctx.beginPath(); ctx.moveTo(x + 1, top - 44); ctx.lineTo(x + 18, top - 38); ctx.lineTo(x + 1, top - 32); ctx.closePath(); ctx.fill();
   }
-  // Herrería: fragua encendida, chimenea con humo, yunque y el herrero junto a la puerta
+  // Herrería: taller de piedra y ladrillo con fragua encendida, yunque, temple y un herrero trabajando el hierro
   function drawForge(f, t) {
     const { x, y, w, h } = f;
+    const ax = x + w - 30, ay = y + h - 6; // yunque (donde trabaja el herrero)
+    // sombra
     ctx.fillStyle = 'rgba(0,0,0,0.25)';
-    ctx.beginPath(); ctx.ellipse(x + w / 2, y + h + 4, w / 2 + 6, 8, 0, 0, TAU); ctx.fill();
-    // paredes de madera y piedra
-    ctx.fillStyle = '#6f5a44'; ctx.fillRect(x, y, w, h);
-    ctx.strokeStyle = '#55432f'; ctx.lineWidth = 1;
-    for (let xx = x + 14; xx < x + w; xx += 14) { ctx.beginPath(); ctx.moveTo(xx, y); ctx.lineTo(xx, y + h); ctx.stroke(); }
-    // techo a dos aguas
-    ctx.fillStyle = '#4a3a2a';
-    ctx.beginPath(); ctx.moveTo(x - 8, y + 6); ctx.lineTo(x + w / 2, y - 22); ctx.lineTo(x + w + 8, y + 6); ctx.closePath(); ctx.fill();
-    // chimenea de piedra y humo
-    ctx.fillStyle = '#5a544c'; ctx.fillRect(x + w - 24, y - 30, 12, 26);
-    for (let i = 0; i < 3; i++) {
-      const k = ((t * 0.4) + i / 3) % 1;
-      ctx.fillStyle = 'rgba(200,200,200,' + (0.35 * (1 - k)).toFixed(3) + ')';
-      ctx.beginPath(); ctx.arc(x + w - 18 + k * 10, y - 32 - k * 28, 4 + k * 5, 0, TAU); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(x + w / 2, y + h + 5, w / 2 + 10, 9, 0, 0, TAU); ctx.fill();
+    // muros de ladrillo en hiladas
+    ctx.fillStyle = '#7d5a46'; ctx.fillRect(x, y, w, h);
+    ctx.strokeStyle = '#5a3f2e'; ctx.lineWidth = 1;
+    for (let yy = y + 8; yy < y + h - 8; yy += 8) { ctx.beginPath(); ctx.moveTo(x, yy); ctx.lineTo(x + w, yy); ctx.stroke(); }
+    let r = 0;
+    for (let yy = y; yy < y + h - 8; yy += 8, r++) {
+      for (let xx = x + (r % 2 ? 6 : 0); xx < x + w; xx += 12) { ctx.beginPath(); ctx.moveTo(xx, yy); ctx.lineTo(xx, yy + 8); ctx.stroke(); }
     }
-    // boca de la fragua encendida
-    ctx.fillStyle = '#2a221c'; ctx.fillRect(x + 12, y + h - 30, 26, 22);
-    const fl = 1 + Math.sin(t * 12) * 0.15;
-    ctx.fillStyle = '#ff7a1c';
-    ctx.beginPath(); ctx.moveTo(x + 16, y + h - 8); ctx.quadraticCurveTo(x + 25, y + h - 30 * fl, x + 34, y + h - 8); ctx.closePath(); ctx.fill();
+    // zócalo de piedra
+    ctx.fillStyle = '#5f5a53'; ctx.fillRect(x - 3, y + h - 8, w + 6, 8);
+    // tejado de tejas con alero
+    ctx.fillStyle = '#5a3a26';
+    ctx.beginPath(); ctx.moveTo(x - 12, y + 10); ctx.lineTo(x + w / 2, y - 24); ctx.lineTo(x + w + 12, y + 10); ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = '#3e2818';
+    for (let k = 1; k < 4; k++) {
+      const ty = y + 10 - k * 8, half = (w / 2 + 12) * (1 - (ty - (y - 24)) / 34);
+      ctx.beginPath(); ctx.moveTo(x + w / 2 - half, ty); ctx.lineTo(x + w / 2 + half, ty); ctx.stroke();
+    }
+    // chimenea de ladrillo con humo
+    ctx.fillStyle = '#6b4a3a'; ctx.fillRect(x + w - 32, y - 40, 16, 46);
+    ctx.fillStyle = '#3a2a20'; ctx.fillRect(x + w - 34, y - 42, 20, 4);
+    for (let i = 0; i < 4; i++) {
+      const k = ((t * 0.35) + i / 4) % 1;
+      ctx.fillStyle = 'rgba(190,190,190,' + (0.4 * (1 - k)).toFixed(3) + ')';
+      ctx.beginPath(); ctx.arc(x + w - 24 + k * 12, y - 44 - k * 30, 4 + k * 6, 0, TAU); ctx.fill();
+    }
+    // arco de la fragua con brasas
+    ctx.fillStyle = '#2a1f18';
+    ctx.fillRect(x + 10, y + h - 34, 30, 26);
+    ctx.beginPath(); ctx.arc(x + 25, y + h - 34, 15, Math.PI, 0); ctx.fill();
+    const glow = 0.6 + 0.3 * Math.sin(t * 10);
+    ctx.fillStyle = 'rgba(255,122,28,' + glow.toFixed(3) + ')';
+    ctx.beginPath(); ctx.ellipse(x + 25, y + h - 16, 11, 5, 0, 0, TAU); ctx.fill();
     ctx.fillStyle = '#ffd166';
-    ctx.beginPath(); ctx.moveTo(x + 21, y + h - 8); ctx.quadraticCurveTo(x + 25, y + h - 20 * fl, x + 29, y + h - 8); ctx.closePath(); ctx.fill();
-    // yunque
-    ctx.fillStyle = '#333'; ctx.fillRect(x + w - 42, y + h - 14, 18, 6); ctx.fillRect(x + w - 39, y + h - 8, 12, 8);
+    ctx.beginPath(); ctx.moveTo(x + 17, y + h - 12); ctx.quadraticCurveTo(x + 25, y + h - 30, x + 33, y + h - 12); ctx.closePath(); ctx.fill();
+    // carbón apilado
+    ctx.fillStyle = '#1e1a18';
+    ctx.beginPath(); ctx.ellipse(x - 8, y + h - 4, 8, 4, 0, 0, TAU); ctx.fill();
+    // barril de temple
+    ctx.fillStyle = '#6b4a2b'; ctx.fillRect(x - 16, y + h - 24, 12, 20);
+    ctx.strokeStyle = '#3f2a16'; ctx.beginPath(); ctx.moveTo(x - 16, y + h - 18); ctx.lineTo(x - 4, y + h - 18); ctx.moveTo(x - 16, y + h - 10); ctx.lineTo(x - 4, y + h - 10); ctx.stroke();
+    // armas colgadas en la pared
+    ctx.strokeStyle = '#c9cdd3'; ctx.lineWidth = 2;
+    for (const sx of [x + 52, x + 60]) { ctx.beginPath(); ctx.moveTo(sx, y + 14); ctx.lineTo(sx + 4, y + 36); ctx.stroke(); }
+    ctx.strokeStyle = '#8a6238'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(x + 70, y + 12); ctx.lineTo(x + 70, y + 40); ctx.stroke();
+    // yunque con cuerno
+    ctx.fillStyle = '#2e2e33';
+    ctx.fillRect(ax - 12, ay - 6, 24, 6);
+    ctx.fillRect(ax - 8, ay, 16, 6);
+    ctx.fillRect(ax - 12, ay + 6, 24, 3);
+    ctx.beginPath(); ctx.moveTo(ax + 12, ay - 6); ctx.lineTo(ax + 20, ay - 4); ctx.lineTo(ax + 12, ay - 2); ctx.closePath(); ctx.fill();
+    // herrero: golpea el hierro con el martillo en un ritmo fijo
+    const hx = ax - 2, hy = y + h + 8;
+    const swing = Math.sin(t * 6);
+    ctx.fillStyle = '#3a2a1a'; ctx.fillRect(hx - 6, hy - 8, 6, 8); ctx.fillRect(hx + 1, hy - 8, 6, 8); // piernas
+    ctx.fillStyle = '#6b3a2a'; ctx.fillRect(hx - 7, hy - 22, 14, 15); // torso (camisa de trabajo)
+    ctx.fillStyle = '#3a2a1a'; ctx.fillRect(hx - 5, hy - 15, 10, 9); // mandil de cuero
+    ctx.fillStyle = '#e0b48a'; ctx.beginPath(); ctx.arc(hx, hy - 27, 5, 0, TAU); ctx.fill(); // cara
+    ctx.fillStyle = '#2a2a2a'; ctx.fillRect(hx - 6, hy - 33, 12, 4); ctx.fillRect(hx - 5, hy - 30, 10, 2); // gorro y barba
+    ctx.fillStyle = '#2a1f18'; ctx.fillRect(hx - 4, hy - 26, 8, 2); // barba
+    // brazo del martillo
+    ctx.save();
+    ctx.translate(hx + 6, hy - 19);
+    ctx.rotate(-1.2 + swing * 0.9);
+    ctx.fillStyle = '#e0b48a'; ctx.fillRect(-1, 0, 3, 12);
+    ctx.fillStyle = '#4a4a50'; ctx.fillRect(-3, 12, 7, 3); // cabeza del martillo
+    ctx.fillStyle = '#7a4a22'; ctx.fillRect(0, 14, 2, 8); // mango
+    ctx.restore();
+    // chispas al golpear
+    if (swing > 0.85) {
+      for (let i = 0; i < 5; i++) {
+        const a = i * 1.3 + t * 9;
+        ctx.fillStyle = i % 2 ? '#ffd166' : '#ff9a3c';
+        ctx.fillRect(ax + Math.cos(a) * 12, ay - 10 + Math.sin(a) * 8 - 4, 2, 2);
+      }
+    }
     // letrero
     ctx.fillStyle = '#fff3dc'; ctx.font = 'bold 10px system-ui, sans-serif'; ctx.textAlign = 'center';
-    ctx.fillText('HERRERÍA', x + w / 2, y - 6); ctx.textAlign = 'start';
-    // el herrero, junto a la puerta
-    const hx = x + w + 14, hy = y + h - 12;
-    ctx.fillStyle = '#7a3a22'; ctx.fillRect(hx - 5, hy - 18, 10, 16);
-    ctx.fillStyle = '#3a2a1a'; ctx.fillRect(hx - 6, hy - 6, 12, 8);
-    ctx.fillStyle = '#e0b48a'; ctx.beginPath(); ctx.arc(hx, hy - 22, 4.5, 0, TAU); ctx.fill();
-    ctx.fillStyle = '#2a2a2a'; ctx.fillRect(hx - 5, hy - 27, 10, 3);
+    ctx.fillText('HERRERÍA', x + w / 2 + 14, y + 26); ctx.textAlign = 'start';
   }
   function drawTent(t) {
     const { x, y } = t;
