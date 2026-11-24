@@ -5,52 +5,64 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Bosque - Tu vs Mi</title>
 <style>
-  html, body { margin: 0; height: 100%; background: #1d2b14; overflow: hidden; font-family: system-ui, sans-serif; }
-  canvas { display: block; width: 100%; height: 100%; cursor: grab; touch-action: none; }
-  canvas.drag { cursor: grabbing; }
-  #hud { position: fixed; left: 12px; top: 10px; color: #eef5e0; background: rgba(0,0,0,.35);
-         padding: 6px 10px; border-radius: 6px; font-size: 13px; pointer-events: none; }
+  html, body { margin: 0; height: 100%; background: #1d2b14; overflow: hidden; font-family: system-ui, sans-serif; user-select: none; }
+  canvas { display: block; width: 100%; height: 100%; cursor: crosshair; touch-action: none; }
+  #hud { position: fixed; left: 12px; top: 10px; color: #eef5e0; background: rgba(0,0,0,.45);
+         padding: 8px 12px; border-radius: 8px; font-size: 13px; line-height: 1.55; pointer-events: none; max-width: 80vw; }
+  #hud b { color: #ffd966; }
+  #over { position: fixed; inset: 0; display: none; flex-direction: column; align-items: center; justify-content: center;
+          background: rgba(0,0,0,.5); color: #fff; font-size: 44px; font-weight: 700; cursor: pointer; }
+  #over small { font-size: 16px; font-weight: 400; margin-top: 10px; }
 </style>
 </head>
 <body>
 <canvas id="c"></canvas>
-<div id="hud">Soldados: 5 · WASD / flechas: mover cámara · arrastra con el mouse · rueda: zoom</div>
+<div id="hud"></div>
+<div id="over"></div>
 <script>
 (() => {
   const WORLD_W = 3200, WORLD_H = 2200;
   const canvas = document.getElementById('c');
   const ctx = canvas.getContext('2d');
+  const hud = document.getElementById('hud');
+  const over = document.getElementById('over');
   let W = 0, H = 0, dpr = 1;
 
-  // ---------- Aleatorio determinista (el bosque es igual en cada carga) ----------
+  // ---------- Aleatorio determinista ----------
   let seed = 20240607;
   const rand = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
   const R = (a, b) => a + (b - a) * rand();
+  const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+  const TAU = Math.PI * 2;
+  const angDiff = (a, b) => ((a - b + Math.PI) % TAU + TAU) % TAU - Math.PI;
 
-  // ---------- Claro central donde se forman los soldados ----------
-  const CX = WORLD_W / 2, CY = WORLD_H / 2, CLEAR_R = 330;
+  // ---------- Claros de spawn: orilla izquierda y esquina opuesta ----------
+  const CLEARINGS = [
+    { x: 260, y: WORLD_H / 2, r: 260 },
+    { x: WORLD_W - 300, y: WORLD_H - 300, r: 260 }
+  ];
+  const inClearing = (x, y, pad) => CLEARINGS.some(c => Math.hypot(x - c.x, y - c.y) < c.r + pad);
 
-  // ---------- Decoración: árboles y arbustos ----------
-  const trees = [], bushes = [];
-  const decor = [];
+  // ---------- Armas que un humano puede cargar ----------
+  // a0 = ángulo de reposo, swing = duración del golpe (s), reach = alcance (px)
+  const WEAPONS = {
+    sword:      { name: 'Espada',    reach: 44, dmg: 20, cd: 0.8, swing: 0.35, speed: 90, shield: true,  a0: -1.1 },
+    spear:      { name: 'Lanza',     reach: 70, dmg: 16, cd: 1.0, swing: 0.45, speed: 80, shield: false, a0: -0.1 },
+    axe:        { name: 'Hacha',     reach: 40, dmg: 24, cd: 1.1, swing: 0.5,  speed: 82, shield: true,  a0: -1.0 },
+    greatsword: { name: 'Espadón',   reach: 52, dmg: 30, cd: 1.4, swing: 0.55, speed: 72, shield: false, a0: -1.0 }
+  };
 
-  function isFree(x, y, r, gap) {
-    if (Math.hypot(x - CX, y - CY) < CLEAR_R + r + 20) return false;
-    for (const d of decor) {
-      if (Math.hypot(x - d.x, y - d.y) < d.r + r + gap) return false;
-    }
+  // ---------- Decoración del bosque ----------
+  const trees = [], bushes = [], decor = [];
+  const isFree = (x, y, r, gap) => {
+    if (inClearing(x, y, r + 20)) return false;
+    for (const d of decor) if (Math.hypot(x - d.x, y - d.y) < d.r + r + gap) return false;
     return true;
-  }
-
-  // Árboles (más juntos)
-  for (let i = 0, tries = 0; trees.length < 650 && tries < 6000; tries++) {
+  };
+  for (let tries = 0; trees.length < 650 && tries < 6000; tries++) {
     const x = R(70, WORLD_W - 70), y = R(70, WORLD_H - 70), r = R(20, 32);
-    if (isFree(x, y, r, 12)) {
-      const t = { type: 'tree', x, y, r, v: Math.floor(rand() * 3) };
-      trees.push(t); decor.push(t);
-    }
+    if (isFree(x, y, r, 12)) { const t = { type: 'tree', x, y, r, v: Math.floor(rand() * 3) }; trees.push(t); decor.push(t); }
   }
-  // Arbustos (llenan huecos)
   for (let tries = 0; bushes.length < 420 && tries < 6000; tries++) {
     const x = R(60, WORLD_W - 60), y = R(60, WORLD_H - 60), r = R(13, 24);
     if (isFree(x, y, r, 2)) {
@@ -59,182 +71,405 @@
     }
   }
 
-  // ---------- Soldados: 5 en fila, solo con espada ----------
-  const soldiers = [];
-  for (let i = 0; i < 5; i++) {
-    soldiers.push({ type: 'soldier', x: CX - 240 + i * 120, y: CY, phase: i * 1.3, id: i + 1 });
-  }
-
-  // ---------- Suelo pre-renderizado (una sola vez) ----------
+  // ---------- Suelo pre-renderizado ----------
   const ground = document.createElement('canvas');
   ground.width = WORLD_W; ground.height = WORLD_H;
   (function buildGround() {
     const g = ground.getContext('2d');
     g.fillStyle = '#43702c';
     g.fillRect(0, 0, WORLD_W, WORLD_H);
-
-    // manchas de tono
     const patch = ['#3a6626', '#4b7a33', '#37601f', '#557f38'];
     for (let i = 0; i < 420; i++) {
-      g.globalAlpha = 0.3;
-      g.fillStyle = patch[Math.floor(rand() * patch.length)];
-      g.beginPath();
-      g.arc(R(0, WORLD_W), R(0, WORLD_H), R(40, 150), 0, Math.PI * 2);
-      g.fill();
+      g.globalAlpha = 0.3; g.fillStyle = patch[Math.floor(rand() * patch.length)];
+      g.beginPath(); g.arc(R(0, WORLD_W), R(0, WORLD_H), R(40, 150), 0, TAU); g.fill();
     }
-    // briznas de hierba
-    g.globalAlpha = 0.6;
-    g.strokeStyle = '#2c5219';
-    g.lineWidth = 1.2;
+    g.globalAlpha = 0.6; g.strokeStyle = '#2c5219'; g.lineWidth = 1.2;
     for (let i = 0; i < 6000; i++) {
       const x = R(0, WORLD_W), y = R(0, WORLD_H), l = R(4, 8), a = R(-0.4, 0.4) - Math.PI / 2;
-      g.beginPath();
-      g.moveTo(x, y);
-      g.lineTo(x + Math.cos(a) * l, y + Math.sin(a) * l);
-      g.stroke();
+      g.beginPath(); g.moveTo(x, y); g.lineTo(x + Math.cos(a) * l, y + Math.sin(a) * l); g.stroke();
     }
-    // hojas caídas
     for (let i = 0; i < 900; i++) {
-      g.globalAlpha = 0.55;
-      g.fillStyle = rand() < 0.5 ? '#8a5a22' : '#a0702a';
-      g.beginPath();
-      g.ellipse(R(0, WORLD_W), R(0, WORLD_H), R(1.5, 3), R(1, 2), R(0, 3), 0, Math.PI * 2);
-      g.fill();
+      g.globalAlpha = 0.55; g.fillStyle = rand() < 0.5 ? '#8a5a22' : '#a0702a';
+      g.beginPath(); g.ellipse(R(0, WORLD_W), R(0, WORLD_H), R(1.5, 3), R(1, 2), R(0, 3), 0, TAU); g.fill();
     }
-    // claro de tierra
-    g.globalAlpha = 0.85;
-    g.fillStyle = '#8a7a4c';
-    g.beginPath(); g.arc(CX, CY, CLEAR_R, 0, Math.PI * 2); g.fill();
-    g.globalAlpha = 0.35;
-    g.fillStyle = '#6e5f36';
-    for (let i = 0; i < 140; i++) {
-      const a = R(0, Math.PI * 2), d = Math.sqrt(rand()) * CLEAR_R * 0.95;
-      g.beginPath(); g.arc(CX + Math.cos(a) * d, CY + Math.sin(a) * d, R(6, 22), 0, Math.PI * 2); g.fill();
-    }
-    g.globalAlpha = 0.8;
-    g.fillStyle = '#9d9274';
-    for (let i = 0; i < 60; i++) {
-      const a = R(0, Math.PI * 2), d = Math.sqrt(rand()) * CLEAR_R * 0.9;
-      g.beginPath(); g.ellipse(CX + Math.cos(a) * d, CY + Math.sin(a) * d, R(1.5, 3), R(1, 2), 0, 0, Math.PI * 2); g.fill();
+    for (const c of CLEARINGS) {
+      g.globalAlpha = 0.85; g.fillStyle = '#8a7a4c';
+      g.beginPath(); g.arc(c.x, c.y, c.r, 0, TAU); g.fill();
+      g.globalAlpha = 0.35; g.fillStyle = '#6e5f36';
+      for (let i = 0; i < 90; i++) {
+        const a = R(0, TAU), d = Math.sqrt(rand()) * c.r * 0.95;
+        g.beginPath(); g.arc(c.x + Math.cos(a) * d, c.y + Math.sin(a) * d, R(6, 22), 0, TAU); g.fill();
+      }
+      g.globalAlpha = 0.8; g.fillStyle = '#9d9274';
+      for (let i = 0; i < 40; i++) {
+        const a = R(0, TAU), d = Math.sqrt(rand()) * c.r * 0.9;
+        g.beginPath(); g.ellipse(c.x + Math.cos(a) * d, c.y + Math.sin(a) * d, R(1.5, 3), R(1, 2), 0, 0, TAU); g.fill();
+      }
     }
     g.globalAlpha = 1;
   })();
 
-  // ---------- Dibujo de objetos ----------
   function drawTree(t) {
     const { x, y, r, v } = t;
     ctx.fillStyle = 'rgba(0,0,0,0.22)';
-    ctx.beginPath(); ctx.ellipse(x + r * 0.35, y + 2, r * 1.1, r * 0.45, 0, 0, Math.PI * 2); ctx.fill();
-
+    ctx.beginPath(); ctx.ellipse(x + r * 0.35, y + 2, r * 1.1, r * 0.45, 0, 0, TAU); ctx.fill();
     ctx.fillStyle = '#5b3d24';
     ctx.fillRect(x - r * 0.18, y - r * 0.9, r * 0.36, r * 0.95);
-
     const cy = y - r * 1.5;
     const cols = ['#1f4d1c', '#27601f', '#2e7024'];
-    const blobs = [[0, 0, 1], [-0.55, 0.25, 0.7], [0.55, 0.2, 0.7], [0, -0.5, 0.75], [-0.3, -0.2, 0.85]];
-    blobs.forEach(([bx, by, br], i) => {
+    [[0, 0, 1], [-0.55, 0.25, 0.7], [0.55, 0.2, 0.7], [0, -0.5, 0.75], [-0.3, -0.2, 0.85]].forEach(([bx, by, br], i) => {
       ctx.fillStyle = cols[(i + v) % 3];
-      ctx.beginPath(); ctx.arc(x + bx * r, cy + by * r, br * r, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(x + bx * r, cy + by * r, br * r, 0, TAU); ctx.fill();
     });
     ctx.fillStyle = 'rgba(255,255,255,0.10)';
-    ctx.beginPath(); ctx.arc(x - r * 0.3, cy - r * 0.5, r * 0.35, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(x - r * 0.3, cy - r * 0.5, r * 0.35, 0, TAU); ctx.fill();
   }
 
   function drawBush(b) {
     const { x, y, r, v } = b;
     ctx.fillStyle = 'rgba(0,0,0,0.2)';
-    ctx.beginPath(); ctx.ellipse(x, y + r * 0.3, r * 1.1, r * 0.4, 0, 0, Math.PI * 2); ctx.fill();
-
+    ctx.beginPath(); ctx.ellipse(x, y + r * 0.3, r * 1.1, r * 0.4, 0, 0, TAU); ctx.fill();
     const cols = ['#3f8a33', '#4a9a3a', '#367c2c'];
-    const blobs = [[-0.5, 0, 0.6], [0.5, 0, 0.6], [0, -0.35, 0.75], [-0.2, 0.15, 0.7], [0.25, 0.1, 0.65]];
-    blobs.forEach(([bx, by, br], i) => {
+    [[-0.5, 0, 0.6], [0.5, 0, 0.6], [0, -0.35, 0.75], [-0.2, 0.15, 0.7], [0.25, 0.1, 0.65]].forEach(([bx, by, br], i) => {
       ctx.fillStyle = cols[(i + v) % 3];
-      ctx.beginPath(); ctx.arc(x + bx * r, y - r * 0.5 + by * r, br * r, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(x + bx * r, y - r * 0.5 + by * r, br * r, 0, TAU); ctx.fill();
     });
     if (b.berries) {
       ctx.fillStyle = '#b8283a';
       for (let i = 0; i < 4; i++) {
-        ctx.beginPath(); ctx.arc(x + Math.cos(i * 1.6) * r * 0.5, y - r * 0.6 + Math.sin(i * 2.1) * r * 0.4, 1.6, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(x + Math.cos(i * 1.6) * r * 0.5, y - r * 0.6 + Math.sin(i * 2.1) * r * 0.4, 1.6, 0, TAU); ctx.fill();
       }
     }
   }
 
-  function roundedSoldierParts(s, t) {
-    const bob = Math.sin(t * 2.2 + s.phase) * 0.6;
-    ctx.save();
-    ctx.translate(s.x, s.y);
-    ctx.scale(1.3, 1.3);
+  // ---------- Unidades ----------
+  const SPAWN_PLAYER = ['sword', 'sword', 'spear', 'axe', 'greatsword'];
+  const SPAWN_ENEMY  = ['sword', 'spear', 'axe', 'sword', 'greatsword'];
+  const ENEMY_POS = [[2870, 1830], [2930, 1885], [2870, 1940], [2930, 1995], [2870, 2050]];
 
-    // sombra
+  let units = [], player = [], enemy = [], effects = [];
+  let control = null, ended = null;
+  const mouse = { x: 0, y: 0 };
+  let rmb = false;
+  const keys = new Set();
+  const cam = { x: 0, y: 0 };
+  let zoom = 1;
+
+  function makeUnit(team, weapon, x, y, f, mode) {
+    return {
+      team, weapon, x, y, f, mode,
+      hp: 100, dead: false,
+      cd: 0, swing: 0, swingTotal: 0, hitDone: false,
+      target: null, aiT: 0, blockT: 0, blocking: false,
+      walkT: 0, flash: 0, vx: 0, vy: 0, ctrl: false,
+      shield: WEAPONS[weapon].shield
+    };
+  }
+
+  function setControl(u) {
+    if (control) control.ctrl = false;
+    control = u;
+    u.ctrl = true;
+  }
+
+  function reset() {
+    player = SPAWN_PLAYER.map((w, i) => makeUnit('player', w, 300, 1100 + (i - 2) * 120, 0, 'defend'));
+    enemy = SPAWN_ENEMY.map((w, i) => makeUnit('enemy', w, ENEMY_POS[i][0], ENEMY_POS[i][1], Math.PI, 'attack'));
+    units = [...player, ...enemy];
+    effects = [];
+    ended = null;
+    over.style.display = 'none';
+    setControl(player[0]);
+    cam.x = control.x; cam.y = control.y;
+  }
+
+  function startSwing(u) {
+    const w = WEAPONS[u.weapon];
+    u.swing = w.swing; u.swingTotal = w.swing;
+    u.cd = w.cd; u.hitDone = false;
+  }
+
+  function addEffect(x, y, text, color) {
+    effects.push({ x, y, text, color, t: 0 });
+  }
+
+  function resolveHit(u) {
+    const w = WEAPONS[u.weapon];
+    const arc = u.weapon === 'spear' ? 0.6 : 1.2;
+    let best = null, bd = Infinity;
+    for (const e of units) {
+      if (e.team === u.team || e.dead) continue;
+      const dx = e.x - u.x, dy = e.y - u.y, d = Math.hypot(dx, dy);
+      if (d > w.reach + 8) continue;
+      if (Math.abs(angDiff(Math.atan2(dy, dx), u.f)) > arc) continue;
+      if (d < bd) { bd = d; best = e; }
+    }
+    if (!best) return;
+    const e = best;
+    const toAttacker = Math.atan2(u.y - e.y, u.x - e.x);
+    const facingAttacker = Math.abs(angDiff(toAttacker, e.f)) < 1.6;
+    let dmg = w.dmg;
+    if (e.blocking && facingAttacker) {
+      if (e.shield) { dmg = w.dmg * 0.05; addEffect(e.x, e.y - 50, 'BLOQUEADO', '#7fd3ff'); }
+      else          { dmg = w.dmg * 0.5;  addEffect(e.x, e.y - 50, 'PARADA', '#7fd3ff'); }
+    } else {
+      addEffect(e.x, e.y - 50, '-' + Math.round(dmg), '#ff6b6b');
+    }
+    e.hp -= dmg;
+    e.flash = 0.2;
+    if (e.hp <= 0) { e.hp = 0; e.dead = true; e.blocking = false; e.target = null; }
+  }
+
+  function findTarget(u) {
+    const limit = u.team === 'enemy' ? 700 : (u.mode === 'attack' ? Infinity : 300);
+    let best = null, bd = limit;
+    for (const e of units) {
+      if (e.team === u.team || e.dead) continue;
+      const d = Math.hypot(e.x - u.x, e.y - u.y);
+      if (d < bd) { bd = d; best = e; }
+    }
+    return best;
+  }
+
+  // IA de unidades que no controlas
+  function think(u, dt) {
+    u.aiT -= dt;
+    if (u.target && u.target.dead) u.target = null;
+    if (u.aiT <= 0) { u.aiT = 0.3 + rand() * 0.2; u.target = findTarget(u); }
+    const t = u.target;
+    if (!t) {
+      // Los enemigos avanzan lentamente hacia el jugador si no hay nadie cerca
+      if (u.team === 'enemy') {
+        let near = null, nd = Infinity;
+        for (const p of units) {
+          if (p.team === u.team || p.dead) continue;
+          const d = Math.hypot(p.x - u.x, p.y - u.y);
+          if (d < nd) { nd = d; near = p; }
+        }
+        if (near && nd > 1) { u.vx = (near.x - u.x) / nd * 55; u.vy = (near.y - u.y) / nd * 55; }
+      }
+      return;
+    }
+    const w = WEAPONS[u.weapon];
+    const dx = t.x - u.x, dy = t.y - u.y, d = Math.hypot(dx, dy);
+    if (u.swing <= 0) u.f = Math.atan2(dy, dx);
+    if (d > w.reach * 0.85) {
+      u.vx = dx / d * w.speed * 0.8; u.vy = dy / d * w.speed * 0.8;
+    } else if (u.cd <= 0 && u.swing <= 0) {
+      startSwing(u);
+    }
+    // Decide bloquear cuando el objetivo está atacando
+    if (t.swing > 0 && d < WEAPONS[t.weapon].reach + 30 && u.blockT <= 0 && rand() < 0.5) {
+      u.blockT = 0.5;
+    }
+  }
+
+  function updateUnits(dt) {
+    const mx = cam.x + (mouse.x - W / 2) / zoom;
+    const my = cam.y + (mouse.y - H / 2) / zoom;
+
+    for (const u of units) {
+      if (u.dead) continue;
+      u.cd = Math.max(0, u.cd - dt);
+      u.flash = Math.max(0, u.flash - dt);
+      u.blockT = Math.max(0, u.blockT - dt);
+
+      if (u.swing > 0) {
+        u.swing -= dt;
+        if (!u.hitDone && u.swing <= u.swingTotal * 0.5) { u.hitDone = true; resolveHit(u); }
+        if (u.swing < 0) u.swing = 0;
+      }
+
+      u.vx = 0; u.vy = 0;
+      if (u.ctrl) {
+        u.blocking = rmb;
+        if (u.swing <= 0) u.f = Math.atan2(my - u.y, mx - u.x);
+        let dx = 0, dy = 0;
+        if (keys.has('a') || keys.has('arrowleft')) dx -= 1;
+        if (keys.has('d') || keys.has('arrowright')) dx += 1;
+        if (keys.has('w') || keys.has('arrowup')) dy -= 1;
+        if (keys.has('s') || keys.has('arrowdown')) dy += 1;
+        if (dx || dy) {
+          const l = Math.hypot(dx, dy), sp = WEAPONS[u.weapon].speed * (u.blocking ? 0.4 : 1);
+          u.vx = dx / l * sp; u.vy = dy / l * sp;
+        }
+      } else {
+        u.blocking = u.blockT > 0;
+        think(u, dt);
+      }
+
+      let k = 1;
+      if (u.swing > 0) k = 0.3;
+      if (u.blocking) k = Math.min(k, 0.4);
+      u.x = clamp(u.x + u.vx * k * dt, 30, WORLD_W - 30);
+      u.y = clamp(u.y + u.vy * k * dt, 30, WORLD_H - 30);
+      if (u.vx || u.vy) u.walkT += dt * 9;
+    }
+
+    // Separación: nadie atraviesa a otro
+    for (let i = 0; i < units.length; i++) {
+      for (let j = i + 1; j < units.length; j++) {
+        const a = units[i], b = units[j];
+        if (a.dead || b.dead) continue;
+        const dx = b.x - a.x, dy = b.y - a.y;
+        const d = Math.hypot(dx, dy), min = 28;
+        if (d < min) {
+          const nx = d < 0.01 ? 1 : dx / d, ny = d < 0.01 ? 0 : dy / d;
+          const push = (min - d) / 2;
+          a.x -= nx * push; a.y -= ny * push;
+          b.x += nx * push; b.y += ny * push;
+        }
+      }
+    }
+  }
+
+  function checkEnd() {
+    if (control.dead) {
+      const alive = player.find(p => !p.dead);
+      if (alive) setControl(alive);
+    }
+    if (!ended) {
+      if (enemy.every(e => e.dead)) ended = 'win';
+      else if (player.every(p => p.dead)) ended = 'lose';
+      if (ended) {
+        over.innerHTML = (ended === 'win' ? '¡Victoria!' : 'Derrota') + '<small>Clic para jugar otra vez</small>';
+        over.style.display = 'flex';
+      }
+    }
+  }
+
+  // ---------- Dibujo de unidades ----------
+  function drawShield(x, y, front, team) {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.fillStyle = '#6b4a2b';
+    ctx.beginPath(); ctx.ellipse(0, 0, 6, 9, 0, 0, TAU); ctx.fill();
+    ctx.strokeStyle = '#c8c8c8'; ctx.lineWidth = 1.5; ctx.stroke();
+    ctx.fillStyle = team === 'enemy' ? '#a8322b' : '#2f6fb0';
+    ctx.beginPath(); ctx.arc(0, 0, 2.5, 0, TAU); ctx.fill();
+    ctx.restore();
+  }
+
+  function drawWeapon(u, bob) {
+    const w = WEAPONS[u.weapon];
+    let a = w.a0, ext = 0;
+    if (u.swing > 0) {
+      const p = 1 - u.swing / u.swingTotal;
+      if (u.weapon === 'spear') ext = Math.sin(p * Math.PI) * 14;
+      else a = w.a0 + (-0.9 + 2.2 * p);
+    }
+    ctx.save();
+    ctx.translate(10, -22 + bob);
+    ctx.rotate(a);
+    if (u.weapon === 'sword') {
+      ctx.fillStyle = '#5b3d24'; ctx.fillRect(-6, -1, 6, 2);
+      ctx.fillStyle = '#c9a227'; ctx.fillRect(0, -4, 2, 8);
+      ctx.fillStyle = '#dfe6ee';
+      ctx.beginPath(); ctx.moveTo(2, -1.6); ctx.lineTo(26, -1.2); ctx.lineTo(30, 0); ctx.lineTo(26, 1.2); ctx.lineTo(2, 1.6); ctx.fill();
+    } else if (u.weapon === 'greatsword') {
+      ctx.fillStyle = '#5b3d24'; ctx.fillRect(-9, -1.2, 9, 2.4);
+      ctx.fillStyle = '#c9a227'; ctx.fillRect(0, -5, 2.5, 10);
+      ctx.fillStyle = '#dfe6ee';
+      ctx.beginPath(); ctx.moveTo(2.5, -2); ctx.lineTo(36, -1.5); ctx.lineTo(41, 0); ctx.lineTo(36, 1.5); ctx.lineTo(2.5, 2); ctx.fill();
+    } else if (u.weapon === 'spear') {
+      ctx.fillStyle = '#7a5230'; ctx.fillRect(-14, -1, 74 + ext, 2);
+      ctx.fillStyle = '#cfd6de';
+      ctx.beginPath(); ctx.moveTo(60 + ext, -3); ctx.lineTo(72 + ext, 0); ctx.lineTo(60 + ext, 3); ctx.fill();
+    } else if (u.weapon === 'axe') {
+      ctx.fillStyle = '#7a5230'; ctx.fillRect(-10, -1.2, 30, 2.4);
+      ctx.fillStyle = '#b9c2cc';
+      ctx.beginPath(); ctx.moveTo(14, 0); ctx.lineTo(18, -8); ctx.lineTo(24, -7); ctx.lineTo(23, 0); ctx.lineTo(24, 7); ctx.lineTo(18, 8); ctx.closePath(); ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  function drawUnit(u, t) {
+    const isEnemy = u.team === 'enemy';
+    const tunic = u.flash > 0 ? '#f0e0a0' : (isEnemy ? '#a8322b' : '#2f6fb0');
+    const helmet = isEnemy ? '#5a5f66' : '#9aa3ad';
+    ctx.save();
+    ctx.translate(u.x, u.y);
+
+    if (u.dead) {
+      ctx.fillStyle = 'rgba(120,20,20,0.45)';
+      ctx.beginPath(); ctx.ellipse(0, 2, 16, 7, 0, 0, TAU); ctx.fill();
+      ctx.fillStyle = isEnemy ? '#7d2620' : '#22507f';
+      ctx.fillRect(-12, -3, 18, 6);
+      ctx.fillStyle = '#e0b48a';
+      ctx.beginPath(); ctx.arc(-14, 0, 4.5, 0, TAU); ctx.fill();
+      ctx.restore();
+      return;
+    }
+
+    const flip = Math.cos(u.f) < 0 ? -1 : 1;
+    ctx.scale(1.3 * flip, 1.3);
+    const moving = u.vx || u.vy;
+    const bob = moving ? 0 : Math.sin(t * 2 + u.x) * 0.5;
+    const st = moving ? Math.sin(u.walkT) * 2 : 0;
+
     ctx.fillStyle = 'rgba(0,0,0,0.3)';
-    ctx.beginPath(); ctx.ellipse(0, 1, 11, 4.5, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(0, 1, 11, 4.5, 0, 0, TAU); ctx.fill();
 
     // piernas
     ctx.fillStyle = '#4a3a2a';
-    ctx.fillRect(-5, -14, 4.5, 14);
-    ctx.fillRect(0.5, -14, 4.5, 14);
+    ctx.fillRect(-5 + st, -14, 4.5, 14);
+    ctx.fillRect(0.5 - st, -14, 4.5, 14);
 
     // brazo trasero
-    ctx.strokeStyle = '#a8322b';
-    ctx.lineWidth = 4;
-    ctx.lineCap = 'round';
+    ctx.strokeStyle = tunic; ctx.lineWidth = 4; ctx.lineCap = 'round';
     ctx.beginPath(); ctx.moveTo(-4, -30 + bob); ctx.lineTo(-6, -20 + bob); ctx.stroke();
 
-    // torso (túnica roja)
-    ctx.fillStyle = '#a8322b';
+    // torso
+    ctx.fillStyle = tunic;
     ctx.fillRect(-7, -33 + bob, 14, 20);
     ctx.fillStyle = '#3b2817';
     ctx.fillRect(-7, -18 + bob, 14, 2.5);
 
-    // cabeza
+    // cabeza y casco
     ctx.fillStyle = '#e0b48a';
-    ctx.beginPath(); ctx.arc(0, -38 + bob, 5.5, 0, Math.PI * 2); ctx.fill();
-
-    // casco
-    ctx.fillStyle = '#8f98a3';
+    ctx.beginPath(); ctx.arc(0, -38 + bob, 5.5, 0, TAU); ctx.fill();
+    ctx.fillStyle = helmet;
     ctx.beginPath(); ctx.arc(0, -40 + bob, 6.2, Math.PI, 0); ctx.fill();
     ctx.fillRect(-6.2, -40 + bob, 12.4, 2);
-    ctx.fillStyle = '#c0392b';
+    ctx.fillStyle = isEnemy ? '#a8322b' : '#2f6fb0';
     ctx.fillRect(-0.8, -47 + bob, 1.6, 4);
 
-    // brazo de la espada
-    const sx = 5, sy = -30 + bob, hx = 10, hy = -22 + bob;
-    ctx.strokeStyle = '#a8322b';
-    ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(hx, hy); ctx.stroke();
+    // escudo en la espalda (si no bloquea)
+    if (u.shield && !u.blocking) drawShield(-7, -22 + bob, false, u.team);
 
-    // espada
-    ctx.save();
-    ctx.translate(hx, hy);
-    ctx.rotate(-1.1);
-    ctx.fillStyle = '#5b3d24';           // empuñadura
-    ctx.fillRect(-6, -1, 6, 2);
-    ctx.fillStyle = '#c9a227';           // guarda
-    ctx.fillRect(-0.5, -4, 2, 8);
-    ctx.fillStyle = '#dfe6ee';           // hoja
-    ctx.beginPath();
-    ctx.moveTo(1.5, -1.6); ctx.lineTo(24, -1.2); ctx.lineTo(28, 0); ctx.lineTo(24, 1.2); ctx.lineTo(1.5, 1.6);
-    ctx.closePath(); ctx.fill();
-    ctx.fillStyle = 'rgba(255,255,255,0.8)';
-    ctx.fillRect(2, -0.4, 22, 0.6);
-    ctx.restore();
+    // brazo del arma
+    ctx.strokeStyle = tunic;
+    ctx.beginPath(); ctx.moveTo(5, -30 + bob); ctx.lineTo(10, -22 + bob); ctx.stroke();
+    drawWeapon(u, bob);
 
-    // mano
+    // escudo al frente (si bloquea)
+    if (u.shield && u.blocking) drawShield(14, -24 + bob, true, u.team);
+
     ctx.fillStyle = '#e0b48a';
-    ctx.beginPath(); ctx.arc(hx, hy, 2, 0, Math.PI * 2); ctx.fill();
-
+    ctx.beginPath(); ctx.arc(10, -22 + bob, 2, 0, TAU); ctx.fill();
     ctx.restore();
+
+    // barra de vida y marcador del soldado controlado
+    if (u.hp < 100 || u.ctrl) {
+      ctx.fillStyle = 'rgba(0,0,0,0.6)';
+      ctx.fillRect(u.x - 15, u.y - 62, 30, 5);
+      ctx.fillStyle = u.hp > 50 ? '#6ccf4f' : '#e74c3c';
+      ctx.fillRect(u.x - 15, u.y - 62, 30 * u.hp / 100, 5);
+    }
+    if (u.ctrl) {
+      ctx.fillStyle = '#ffd966';
+      ctx.beginPath();
+      ctx.moveTo(u.x, u.y - 72); ctx.lineTo(u.x - 5, u.y - 80); ctx.lineTo(u.x + 5, u.y - 80);
+      ctx.closePath(); ctx.fill();
+    }
   }
 
   // ---------- Cámara ----------
-  const cam = { x: CX, y: CY };
-  let zoom = 1;
-  const keys = new Set();
-
   function clampCamera() {
     const hw = Math.min(W / 2 / zoom, WORLD_W / 2);
     const hh = Math.min(H / 2 / zoom, WORLD_H / 2);
-    cam.x = Math.min(Math.max(cam.x, hw), WORLD_W - hw);
-    cam.y = Math.min(Math.max(cam.y, hh), WORLD_H - hh);
+    cam.x = clamp(cam.x, hw, WORLD_W - hw);
+    cam.y = clamp(cam.y, hh, WORLD_H - hh);
   }
 
   function resize() {
@@ -245,87 +480,112 @@
     clampCamera();
   }
   window.addEventListener('resize', resize);
-  resize();
 
+  // ---------- Controles ----------
   window.addEventListener('keydown', e => {
-    if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight',' '].includes(e.key)) e.preventDefault();
-    keys.add(e.key.toLowerCase());
+    if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' ', 'Tab'].includes(e.key)) e.preventDefault();
+    const k = e.key.toLowerCase();
+    keys.add(k);
+    if (ended) return;
+    if (k === 'e') {
+      // Ordena a toda tu escuadra atacar
+      for (const p of player) if (!p.dead) p.mode = 'attack';
+    } else if (k === 'r') {
+      // Ordena a tu escuadra defender su posición
+      for (const p of player) if (!p.dead) p.mode = 'defend';
+    } else if (k === 'tab') {
+      const alive = player.filter(p => !p.dead);
+      if (alive.length) setControl(alive[(alive.indexOf(control) + 1) % alive.length]);
+    }
   });
   window.addEventListener('keyup', e => keys.delete(e.key.toLowerCase()));
+  window.addEventListener('blur', () => { keys.clear(); rmb = false; });
 
-  let dragging = false, lastX = 0, lastY = 0;
+  canvas.addEventListener('contextmenu', e => e.preventDefault());
+  canvas.addEventListener('pointermove', e => { mouse.x = e.clientX; mouse.y = e.clientY; });
   canvas.addEventListener('pointerdown', e => {
-    dragging = true; lastX = e.clientX; lastY = e.clientY;
-    canvas.classList.add('drag');
-    canvas.setPointerCapture(e.pointerId);
+    mouse.x = e.clientX; mouse.y = e.clientY;
+    if (e.button === 0 && !ended && control && !control.dead && control.cd <= 0 && control.swing <= 0) {
+      startSwing(control);
+    } else if (e.button === 2) {
+      rmb = true;
+    }
   });
-  canvas.addEventListener('pointermove', e => {
-    if (!dragging) return;
-    cam.x -= (e.clientX - lastX) / zoom;
-    cam.y -= (e.clientY - lastY) / zoom;
-    lastX = e.clientX; lastY = e.clientY;
-    clampCamera();
-  });
-  const endDrag = () => { dragging = false; canvas.classList.remove('drag'); };
-  canvas.addEventListener('pointerup', endDrag);
-  canvas.addEventListener('pointercancel', endDrag);
+  window.addEventListener('pointerup', e => { if (e.button === 2) rmb = false; });
+  over.addEventListener('click', reset);
   canvas.addEventListener('wheel', e => {
     e.preventDefault();
-    zoom = Math.min(2, Math.max(0.5, zoom * (e.deltaY > 0 ? 0.9 : 1.1)));
+    zoom = clamp(zoom * (e.deltaY > 0 ? 0.9 : 1.1), 0.5, 2);
     clampCamera();
   }, { passive: false });
 
-  // ---------- Bucle principal ----------
-  function update(dt) {
-    const speed = 600 * dt / zoom;
-    let dx = 0, dy = 0;
-    if (keys.has('a') || keys.has('arrowleft')) dx -= 1;
-    if (keys.has('d') || keys.has('arrowright')) dx += 1;
-    if (keys.has('w') || keys.has('arrowup')) dy -= 1;
-    if (keys.has('s') || keys.has('arrowdown')) dy += 1;
-    if (dx || dy) {
-      const len = Math.hypot(dx, dy);
-      cam.x += dx / len * speed;
-      cam.y += dy / len * speed;
-      clampCamera();
-    }
-  }
-
+  // ---------- Render ----------
   function render(t) {
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.fillStyle = '#1d2b14';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
-
     ctx.setTransform(dpr * zoom, 0, 0, dpr * zoom,
                      dpr * (W / 2 - cam.x * zoom), dpr * (H / 2 - cam.y * zoom));
     ctx.drawImage(ground, 0, 0);
 
-    // Objetos visibles, ordenados por profundidad (y)
     const m = 80 / zoom;
     const left = cam.x - W / 2 / zoom - m, right = cam.x + W / 2 / zoom + m;
     const top = cam.y - H / 2 / zoom - m, bottom = cam.y + H / 2 / zoom + m;
     const items = [];
-    for (const d of decor) {
-      if (d.x >= left && d.x <= right && d.y >= top && d.y <= bottom) items.push(d);
-    }
-    for (const s of soldiers) items.push(s);
+    for (const d of decor) if (d.x >= left && d.x <= right && d.y >= top && d.y <= bottom) items.push(d);
+    for (const u of units) if (u.x >= left && u.x <= right && u.y >= top && u.y <= bottom) items.push(u);
     items.sort((a, b) => a.y - b.y);
-
     for (const it of items) {
       if (it.type === 'tree') drawTree(it);
       else if (it.type === 'bush') drawBush(it);
-      else roundedSoldierParts(it, t);
+      else drawUnit(it, t);
     }
+
+    ctx.font = 'bold 13px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    for (const e of effects) {
+      ctx.globalAlpha = Math.max(0, 1 - e.t / 0.9);
+      ctx.fillStyle = e.color;
+      ctx.fillText(e.text, e.x, e.y - e.t * 30);
+    }
+    ctx.globalAlpha = 1;
   }
 
-  let last = performance.now();
+  function updateHud() {
+    const pa = player.filter(p => !p.dead).length;
+    const ea = enemy.filter(e => !e.dead).length;
+    hud.innerHTML =
+      `<b>Controlas:</b> ${WEAPONS[control.weapon].name} · vida ${Math.ceil(control.hp)}` +
+      `${control.blocking ? ' · <b>bloqueando</b>' : ''}<br>` +
+      `Tu escuadra (azul): ${pa}/5 · Enemigo (rojo): ${ea}/5<br>` +
+      `WASD mover · Mouse apuntar · Clic izq. atacar · Mantén clic der. defender · ` +
+      `E escuadra atacar · R escuadra defender · Tab cambiar soldado · Rueda zoom`;
+  }
+
+  // ---------- Bucle ----------
+  let last = performance.now(), hudT = 0;
   function frame(now) {
     const dt = Math.min(0.05, (now - last) / 1000);
     last = now;
-    update(dt);
+    if (!ended) {
+      updateUnits(dt);
+      for (const e of effects) e.t += dt;
+      for (let i = effects.length - 1; i >= 0; i--) if (effects[i].t > 0.9) effects.splice(i, 1);
+      checkEnd();
+    }
+    if (control && !control.dead) {
+      cam.x += (control.x - cam.x) * Math.min(1, dt * 5);
+      cam.y += (control.y - cam.y) * Math.min(1, dt * 5);
+    }
+    clampCamera();
     render(now / 1000);
+    hudT += dt;
+    if (hudT > 0.15) { hudT = 0; updateHud(); }
     requestAnimationFrame(frame);
   }
+
+  resize();
+  reset();
   requestAnimationFrame(frame);
 })();
 </script>
