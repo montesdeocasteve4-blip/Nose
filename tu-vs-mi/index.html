@@ -152,7 +152,7 @@
   }
   const HEAL_R = 260, HEAL_RATE = 10;
   const CLEARINGS = [
-    { x: 760, y: WORLD_H / 2, r: 260 },
+    { x: 760, y: WORLD_H / 2, r: 260, blob: true },
     { x: WORLD_W - 300, y: WORLD_H - 300, r: 260 }
   ];
   const inClearing = (x, y, pad) => CLEARINGS.some(c => Math.hypot(x - c.x, y - c.y) < c.r + pad);
@@ -214,7 +214,14 @@
     }
     for (const c of CLEARINGS) {
       g.globalAlpha = 0.85; g.fillStyle = '#8a7a4c';
-      g.beginPath(); g.arc(c.x, c.y, c.r, 0, TAU); g.fill();
+      g.beginPath();
+      for (let i = 0; i <= 64; i++) {
+        const a = i / 64 * TAU;
+        const rr = c.blob ? c.r * (0.84 + 0.1 * Math.sin(3 * a + 1) + 0.06 * Math.sin(5 * a + 2)) : c.r;
+        const px = c.x + Math.cos(a) * rr, py = c.y + Math.sin(a) * rr;
+        if (i === 0) g.moveTo(px, py); else g.lineTo(px, py);
+      }
+      g.closePath(); g.fill();
       g.globalAlpha = 0.35; g.fillStyle = '#6e5f36';
       for (let i = 0; i < 90; i++) {
         const a = R(0, TAU), d = Math.sqrt(rand()) * c.r * 0.95;
@@ -263,7 +270,7 @@
   }
 
   // ---------- Unidades ----------
-  const SPAWN_PLAYER = ['sword', 'bow', 'spear', 'axe', 'greatsword'];
+  const SPAWN_PLAYER = ['sword', 'bow', 'spear', 'axe', 'greatsword', 'sword', 'spear'];
   const SPAWN_ENEMY  = ['sword', 'spear', 'axe', 'sword', 'greatsword'];
   const ENEMY_POS = [[3270, 1830], [3330, 1885], [3270, 1940], [3330, 1995], [3270, 2050]];
 
@@ -280,11 +287,21 @@
     { type: 'pit', x: 2290, y: 1380, r: 34, sy: 1380 }
   ];
   let horse = { type: 'horse', x: 575, y: 470, f: 0, moving: false, rider: null };
+  // Asientos de tronco alrededor de la fogata
+  const SEATS = [0.3, 1.25, 2.2, 3.2, 4.1, 5.2].map(a => ({
+    type: 'seat', x: FIRE.x + Math.cos(a) * 92, y: FIRE.y + Math.sin(a) * 66,
+    a: a + Math.PI / 2, sy: FIRE.y + Math.sin(a) * 66 + 6
+  }));
+  // Muñecos de paja: puedes pegarles para entrenar
+  const DUMMIES = [[1180, 560], [1260, 560], [1220, 1000]].map(([x, y]) => ({
+    type: 'dummy', team: 'dummy', x, y, sy: y, hp: 100, dead: false, flash: 0, t: 0,
+    f: 0, blocking: false, shield: false
+  }));
   // Puntos de guardia dentro de la muralla, uno por entrada
   const GATE_GUARD = [
-    { x: FMX, y: FY0 + FORT_T + 50 },
-    { x: FMX, y: FY1 - FORT_T - 50 },
-    { x: FX1 - FORT_T - 50, y: FMY }
+    { x: FMX - 40, y: FY0 + FORT_T + 50 }, { x: FMX + 40, y: FY0 + FORT_T + 50 },
+    { x: FMX - 40, y: FY1 - FORT_T - 50 }, { x: FMX + 40, y: FY1 - FORT_T - 50 },
+    { x: FX1 - FORT_T - 50, y: FMY - 40 }, { x: FX1 - FORT_T - 50, y: FMY + 40 }
   ];
   let control = null, ended = null;
   const mouse = { x: 0, y: 0 };
@@ -313,7 +330,7 @@
   }
 
   function reset() {
-    player = SPAWN_PLAYER.map((w, i) => makeUnit('player', w, 800, 1100 + (i - 2) * 120, 0, 'base'));
+    player = SPAWN_PLAYER.map((w, i) => makeUnit('player', w, 800, 1100 + (i - 3) * 110, 0, 'base'));
     alert = { active: false, phase: 'idle', caller: null, t: 0 };
     horse = { type: 'horse', x: 575, y: 470, f: 0, moving: false, rider: null };
     enemy = SPAWN_ENEMY.map((w, i) => makeUnit('enemy', w, ENEMY_POS[i][0], ENEMY_POS[i][1], Math.PI, 'attack'));
@@ -340,7 +357,7 @@
     const w = WEAPONS[u.weapon];
     const arc = u.weapon === 'spear' ? 0.6 : 1.2;
     let best = null, bd = Infinity;
-    for (const e of units) {
+    for (const e of [...units, ...DUMMIES]) {
       if (e.team === u.team || e.dead) continue;
       const dx = e.x - u.x, dy = e.y - u.y, d = Math.hypot(dx, dy);
       if (d > w.reach + 8) continue;
@@ -435,9 +452,9 @@
   // Puesto de guardia: en modo Base, tres vigilan las entradas; el resto rodea la fogata
   function homePos(u) {
     const i = squadGroup().indexOf(u);
-    if (u.homeMode === 'base' && i >= 0 && i < 3) return GATE_GUARD[i];
-    const ang = (Math.max(0, i) / 4) * TAU + Math.PI / 4;
-    return { x: FIRE.x + Math.cos(ang) * 85, y: FIRE.y + Math.sin(ang) * 85 };
+    if (u.homeMode === 'base' && i >= 0 && i < GATE_GUARD.length) return GATE_GUARD[i];
+    const ang = (Math.max(0, i) / Math.max(1, squadGroup().length)) * TAU + Math.PI / 4;
+    return { x: FIRE.x + Math.cos(ang) * 120, y: FIRE.y + Math.sin(ang) * 120 };
   }
   function alertCenter() { return alert.caller && !alert.caller.dead ? alert.caller : FIRE; }
   function startAlert(caller) {
@@ -540,15 +557,12 @@
     ctx.scale(1.3 * flip, 1.3);
     ctx.fillStyle = 'rgba(0,0,0,0.3)';
     ctx.beginPath(); ctx.ellipse(0, 2, 30, 8, 0, 0, TAU); ctx.fill();
-    ctx.lineCap = 'round';
-    // cola al viento
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    // cola
     ctx.strokeStyle = '#4a2c14'; ctx.lineWidth = 4;
     ctx.beginPath(); ctx.moveTo(-25, -20); ctx.quadraticCurveTo(-40, -16, -38 + sw(0) * 2, -4); ctx.stroke();
-    ctx.strokeStyle = '#2b1a0c'; ctx.lineWidth = 2;
-    ctx.beginPath(); ctx.moveTo(-27, -19); ctx.quadraticCurveTo(-41, -14, -39 + sw(0) * 2, -3); ctx.stroke();
-    // patas traseras y delanteras en galope (pares alternados)
-    const legs = [[-17, 0], [-11, Math.PI], [13, Math.PI], [19, 0]];
-    for (const [lx, p] of legs) {
+    // patas en galope (pares alternados)
+    for (const [lx, p] of [[-17, 0], [-11, Math.PI], [13, Math.PI], [19, 0]]) {
       const s = Math.sin(ph + p) * (moving ? 4 : 0);
       const kx = lx + s * 0.5, ky = -7 - Math.abs(Math.cos(ph + p)) * (moving ? 2 : 0);
       ctx.strokeStyle = '#6a4220'; ctx.lineWidth = 3.4;
@@ -556,35 +570,47 @@
       ctx.fillStyle = '#1e120a';
       ctx.fillRect(lx + s - 2.6, -1, 5.2, 3);
     }
-    // cuerpo con sombra de vientre y grupa
+    // cuerpo
     ctx.fillStyle = '#8b5a2b';
     ctx.beginPath(); ctx.ellipse(0, -18, 24, 10, 0, 0, TAU); ctx.fill();
     ctx.fillStyle = '#6a4220';
     ctx.beginPath(); ctx.ellipse(0, -13, 20, 4.5, 0, 0, TAU); ctx.fill();
     ctx.fillStyle = 'rgba(40,20,5,0.2)';
     ctx.beginPath(); ctx.ellipse(-9, -19, 9, 7, 0, 0, TAU); ctx.fill();
-    // cuello y cabeza
+    // cuello: sale de la cruz y sube a la nuca
     ctx.fillStyle = '#8b5a2b';
     ctx.beginPath();
-    ctx.moveTo(12, -24); ctx.quadraticCurveTo(22, -36, 28, -46); ctx.lineTo(37, -41);
-    ctx.quadraticCurveTo(26, -26, 16, -12); ctx.closePath(); ctx.fill();
-    ctx.beginPath(); ctx.ellipse(36, -42, 8.5, 5.8, -0.55, 0, TAU); ctx.fill();
+    ctx.moveTo(6, -22);
+    ctx.quadraticCurveTo(14, -36, 25, -50);
+    ctx.lineTo(33, -47);
+    ctx.quadraticCurveTo(26, -32, 17, -14);
+    ctx.closePath(); ctx.fill();
+    // cabeza: frente, hocico y quijada
+    ctx.beginPath();
+    ctx.moveTo(26, -51);
+    ctx.quadraticCurveTo(35, -53, 42, -45);
+    ctx.quadraticCurveTo(47, -40, 46, -35);
+    ctx.quadraticCurveTo(44, -32, 39, -33);
+    ctx.quadraticCurveTo(31, -34, 27, -39);
+    ctx.closePath(); ctx.fill();
+    // hocico claro, fosa nasal, ojo y mancha blanca
     ctx.fillStyle = '#c49a68';
-    ctx.beginPath(); ctx.ellipse(42.5, -37.5, 4.2, 3.4, -0.55, 0, TAU); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(41, -43); ctx.quadraticCurveTo(47, -41, 46, -35); ctx.quadraticCurveTo(43, -33, 39, -35); ctx.closePath(); ctx.fill();
     ctx.fillStyle = '#3b2412';
-    ctx.beginPath(); ctx.arc(44.5, -38.5, 0.9, 0, TAU); ctx.fill();
+    ctx.beginPath(); ctx.arc(44.5, -38, 1, 0, TAU); ctx.fill();
     ctx.fillStyle = '#f2ead8';
-    ctx.beginPath(); ctx.ellipse(38, -44, 1.6, 3.4, -0.55, 0, TAU); ctx.fill();
-    ctx.beginPath(); ctx.arc(35, -46.5, 1.8, 0, TAU); ctx.fill();
+    ctx.beginPath(); ctx.arc(34, -46, 1.9, 0, TAU); ctx.fill();
     ctx.fillStyle = '#120a04';
-    ctx.beginPath(); ctx.arc(35.4, -46.5, 1, 0, TAU); ctx.fill();
-    // orejas
+    ctx.beginPath(); ctx.arc(34.4, -46, 1.1, 0, TAU); ctx.fill();
+    ctx.strokeStyle = '#f2ead8'; ctx.lineWidth = 1.6;
+    ctx.beginPath(); ctx.moveTo(36, -49); ctx.lineTo(43, -42); ctx.stroke();
+    // oreja
     ctx.fillStyle = '#6a4220';
-    ctx.beginPath(); ctx.moveTo(30, -50); ctx.lineTo(31.5, -57); ctx.lineTo(34, -50); ctx.closePath(); ctx.fill();
-    // crin ondulada a lo largo del cuello
+    ctx.beginPath(); ctx.moveTo(27, -51); ctx.lineTo(28.5, -58); ctx.lineTo(32, -52); ctx.closePath(); ctx.fill();
+    // crin a lo largo del cuello
     ctx.strokeStyle = '#2b1a0c'; ctx.lineWidth = 2.4;
     for (let i = 0; i < 5; i++) {
-      const bx = 15 + i * 3.6, by = -24 - i * 4.6;
+      const bx = 9 + i * 3.4, by = -24 - i * 5.2;
       ctx.beginPath(); ctx.moveTo(bx, by);
       ctx.quadraticCurveTo(bx - 3 + sw(i) * 1.5, by - 2, bx - 5 + sw(i) * 2, by - 4); ctx.stroke();
     }
@@ -597,6 +623,85 @@
       ctx.beginPath(); ctx.ellipse(2, -30, 10, 3.2, 0, 0, TAU); ctx.fill();
       ctx.strokeStyle = '#c9a227'; ctx.lineWidth = 1.3;
       ctx.beginPath(); ctx.moveTo(4, -28); ctx.lineTo(4, -17); ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  // ---------- Muñecos de paja para entrenar ----------
+  function updateDummies(dt) {
+    for (const d of DUMMIES) {
+      d.flash = Math.max(0, d.flash - dt);
+      if (d.dead) {
+        d.t += dt;
+        if (d.t > 4) { d.dead = false; d.hp = 100; d.t = 0; }
+      }
+    }
+  }
+  function drawDummy(d) {
+    const x = d.x, y = d.y;
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+    ctx.beginPath(); ctx.ellipse(0, 3, 14, 5, 0, 0, TAU); ctx.fill();
+    if (d.dead) {
+      // tirado en el suelo
+      ctx.fillStyle = '#d9b050';
+      ctx.beginPath(); ctx.ellipse(0, -4, 16, 7, 0.1, 0, TAU); ctx.fill();
+      ctx.fillStyle = '#c9a24a';
+      ctx.beginPath(); ctx.arc(-16, -5, 6, 0, TAU); ctx.fill();
+      ctx.restore();
+      return;
+    }
+    // poste y travesaño
+    ctx.fillStyle = '#6b4a2b'; ctx.fillRect(-3, -46, 6, 48);
+    ctx.fillStyle = '#7a5230'; ctx.fillRect(-18, -34, 36, 5);
+    // brazos de paja
+    ctx.strokeStyle = '#d9b050'; ctx.lineWidth = 4; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(-16, -32); ctx.lineTo(-24, -20); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(16, -32); ctx.lineTo(24, -20); ctx.stroke();
+    // cuerpo de saco con paja que asoma
+    ctx.fillStyle = d.flash > 0 ? '#fff3c4' : '#d9b050';
+    ctx.beginPath(); ctx.ellipse(0, -24, 10, 13, 0, 0, TAU); ctx.fill();
+    ctx.strokeStyle = '#a57d25'; ctx.lineWidth = 1;
+    for (let i = -8; i <= 8; i += 4) {
+      ctx.beginPath(); ctx.moveTo(i, -36 + Math.abs(i) * 0.3); ctx.lineTo(i + 2, -28); ctx.stroke();
+    }
+    // diana en el pecho
+    ctx.fillStyle = '#b8322b';
+    ctx.beginPath(); ctx.arc(0, -24, 3.5, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#f2ead8';
+    ctx.beginPath(); ctx.arc(0, -24, 1.4, 0, TAU); ctx.fill();
+    // cabeza: saco con cara
+    ctx.fillStyle = '#c9a24a';
+    ctx.beginPath(); ctx.arc(0, -46, 8, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#3b2412';
+    ctx.fillRect(-3.5, -48, 2, 2); ctx.fillRect(1.5, -48, 2, 2);
+    ctx.strokeStyle = '#3b2412'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(-3, -42); ctx.lineTo(3, -42); ctx.stroke();
+    ctx.restore();
+    if (d.hp < 100) {
+      ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(x - 15, y - 62, 30, 5);
+      ctx.fillStyle = '#e0c060'; ctx.fillRect(x - 15, y - 62, 30 * d.hp / 100, 5);
+    }
+  }
+
+  // ---------- Fogata natural: asientos de tronco alrededor ----------
+  function drawSeat(s) {
+    ctx.save();
+    ctx.translate(s.x, s.y);
+    ctx.rotate(s.a);
+    ctx.fillStyle = 'rgba(0,0,0,0.25)';
+    ctx.fillRect(-20, 4, 40, 9);
+    ctx.fillStyle = '#6b4a2b';
+    ctx.fillRect(-20, -5, 40, 10);
+    ctx.fillStyle = '#8a6238';
+    ctx.fillRect(-20, -5, 40, 4);
+    ctx.strokeStyle = '#3f2a16'; ctx.lineWidth = 1;
+    ctx.strokeRect(-19.5, -4.5, 39, 9);
+    ctx.fillStyle = '#c49a64';
+    for (const ex of [-20, 20]) {
+      ctx.beginPath(); ctx.ellipse(ex, 0, 3, 5, 0, 0, TAU); ctx.fill();
+      ctx.strokeStyle = '#3f2a16'; ctx.stroke();
     }
     ctx.restore();
   }
@@ -692,6 +797,7 @@
   function updateUnits(dt) {
     updateAlert(dt);
     updateHorse();
+    updateDummies(dt);
     const mx = cam.x + (mouse.x - W / 2) / zoom;
     const my = cam.y + (mouse.y - H / 2) / zoom;
 
@@ -821,7 +927,7 @@
       const a = arrows[i];
       a.x += a.vx * dt; a.y += a.vy * dt;
       let hit = false;
-      for (const e of units) {
+      for (const e of [...units, ...DUMMIES]) {
         if (e.team === a.team || e.dead) continue;
         if (Math.hypot(e.x - a.x, e.y - a.y) <= 14) { applyArrowHit(a, e); hit = true; break; }
       }
@@ -963,6 +1069,11 @@
   // ---------- Dibujo de la fogata ----------
   function drawFire(f, t) {
     const { x, y } = f;
+    for (let i = 0; i < 9; i++) {
+      const a = i / 9 * TAU + 0.2;
+      ctx.fillStyle = i % 2 ? '#7d7a72' : '#6a675f';
+      ctx.beginPath(); ctx.ellipse(x + Math.cos(a) * 24, y + Math.sin(a) * 15 + 2, 5, 3.5, 0, 0, TAU); ctx.fill();
+    }
     ctx.strokeStyle = 'rgba(255,200,90,0.35)'; ctx.lineWidth = 2; ctx.setLineDash([6, 6]);
     ctx.beginPath(); ctx.arc(x, y, HEAL_R, 0, TAU); ctx.stroke(); ctx.setLineDash([]);
     ctx.fillStyle = 'rgba(255,170,60,0.12)';
@@ -1331,6 +1442,8 @@
     for (const u of units) if (u.x >= left && u.x <= right && u.y >= top && u.y <= bottom) items.push(u);
     for (const w of WALLS) items.push(w);
     items.push(STABLE);
+    for (const s of SEATS) items.push(s);
+    for (const d of DUMMIES) items.push(d);
     for (const p of PITS) items.push(p);
     if (!horse.rider) items.push(horse);
     items.sort((a, b) => (a.sy ?? a.y) - (b.sy ?? b.y));
@@ -1342,6 +1455,8 @@
       else if (it.type === 'wall') drawWall(it);
       else if (it.type === 'stable') drawStable(it);
       else if (it.type === 'pit') drawPit(it);
+      else if (it.type === 'seat') drawSeat(it);
+      else if (it.type === 'dummy') drawDummy(it);
       else if (it.type === 'horse') drawHorseAt(it.x, it.y, it.f, t, it.moving);
       else drawUnit(it, t);
     }
@@ -1373,7 +1488,7 @@
     hud.innerHTML =
       `<b>Controlas:</b> ${WEAPONS[control.weapon].name} · vida ${Math.ceil(control.hp)}` +
       `${control.blocking ? ' · <b>bloqueando</b>' : ''}<br>` +
-      `Tu escuadra (azul): ${pa}/5 · Enemigo (rojo): ${ea}/5<br>` +
+      `Tu escuadra (azul): ${pa}/${player.length} · Enemigo (rojo): ${ea}/5<br>` +
       `<span class="keyhelp">WASD mover · Mouse apuntar · Clic izq. atacar · Mantén clic der. defender · ` +
       `E escuadra atacar · R fogata · B base · Tab cambiar soldado · 1-5 o G estante · M montar · Rueda zoom</span>` +
       `<span class="touchhelp">Joystick: mover · Botones: atacar, defender y órdenes a tu escuadra</span>`;
