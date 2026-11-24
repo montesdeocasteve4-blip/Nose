@@ -331,9 +331,11 @@
 
   function reset() {
     player = SPAWN_PLAYER.map((w, i) => makeUnit('player', w, 800, 1100 + (i - 3) * 110, 0, 'base'));
+    player.forEach((p, i) => { p.slot = i; });
     alert = { active: false, phase: 'idle', caller: null, t: 0 };
     horse = { type: 'horse', x: 575, y: 470, f: 0, moving: false, rider: null };
     enemyWave = false; enemyTimer = 0;
+    resetEconomy();
     enemy =SPAWN_ENEMY.map((w, i) => makeUnit('enemy', w, ENEMY_POS[i][0], ENEMY_POS[i][1], Math.PI, 'attack'));
     units = [...player, ...enemy];
     effects = [];
@@ -459,9 +461,9 @@
   function squadGroup() { return player.filter(p => !p.ctrl && !p.dead); }
   // Puesto de guardia: en modo Base, tres vigilan las entradas; el resto rodea la fogata
   function homePos(u) {
-    const i = squadGroup().indexOf(u);
-    if (u.homeMode === 'base' && i >= 0 && i < GATE_GUARD.length) return GATE_GUARD[i];
-    const ang = (Math.max(0, i) / Math.max(1, squadGroup().length)) * TAU + Math.PI / 4;
+    const s = u.slot || 0;
+    if (u.homeMode === 'base' && s >= 1 && s <= GATE_GUARD.length) return GATE_GUARD[s - 1];
+    const ang = (s / SPAWN_PLAYER.length) * TAU + Math.PI / 4;
     return { x: FIRE.x + Math.cos(ang) * 120, y: FIRE.y + Math.sin(ang) * 120 };
   }
   function alertCenter() { return alert.caller && !alert.caller.dead ? alert.caller : FIRE; }
@@ -766,9 +768,16 @@
         if (d < bd) { bd = d; best = p; }
       }
       if (best) {
-        BOULDERS.push({ type: 'boulder', x0: CATA.x, y0: CATA.y, x: best.x, y: best.y, t: 0, dur: 1.1 });
+        BOULDERS.push({ type: 'boulder', x0: CATA.x, y0: CATA.y, x: best.x, y: best.y, t: 0, dur: 1.1, struct: null });
         CATA.cd = 5; CATA.fire = 0.25;
-      } else CATA.cd = 1;
+      } else {
+        // Sin soldados a tiro: la catapulta ataca tu economía (cocina si existe, si no el campo)
+        const s = KITCHEN.built ? KITCHEN : FIELD;
+        const tx = s === KITCHEN ? KITCHEN.x : FIELD.x + FIELD.w / 2;
+        const ty = s === KITCHEN ? KITCHEN.y : FIELD.y + FIELD.h / 2;
+        BOULDERS.push({ type: 'boulder', x0: CATA.x, y0: CATA.y, x: tx, y: ty, t: 0, dur: 1.1, struct: s });
+        CATA.cd = 12; CATA.fire = 0.25;
+      }
     }
     for (let i = BOULDERS.length - 1; i >= 0; i--) {
       const b = BOULDERS[i];
@@ -782,6 +791,9 @@
           if (p.hp <= 0) { p.hp = 0; p.dead = true; p.target = null; }
         }
       }
+      // La piedra que cae sobre el campo lo quema (vuelve a sembrar); sobre la cocina la destruye
+      if (b.struct === FIELD) FIELD.t = 0;
+      else if (b.struct === KITCHEN) KITCHEN.built = false;
       BOULDERS.splice(i, 1);
     }
   }
@@ -852,6 +864,133 @@
     ctx.fillStyle = '#ffd166';
     ctx.beginPath(); ctx.moveTo(x - 4, y - 1); ctx.quadraticCurveTo(x - 2, y - 12, x, y - 14 * f1);
     ctx.quadraticCurveTo(x + 2, y - 10, x + 4, y - 1); ctx.closePath(); ctx.fill();
+  }
+
+  // ---------- Campo, cocina y comida de tu escuadra ----------
+  const FIELD = { type: 'field', x: 980, y: 1480, w: 190, h: 120, t: 0, sy: 1600 };
+  const KITCHEN = { type: 'kitchen', x: 880, y: 1010, built: false, t: 0, sy: 1030 };
+  const FOOD = { stock: 2 };
+  function resetEconomy() {
+    FIELD.t = 0; KITCHEN.built = false; KITCHEN.t = 0; FOOD.stock = 2;
+    for (const s of SEATS) s.user = null;
+  }
+  // El campo madura en 60 s; entonces aparece la cocina, que hace 1 comida cada 20 s (máximo 10)
+  function updateEconomy(dt) {
+    if (!KITCHEN.built) {
+      FIELD.t = Math.min(60, FIELD.t + dt);
+      if (FIELD.t >= 60) { KITCHEN.built = true; addEffect(KITCHEN.x, KITCHEN.y - 50, 'Cocina lista', '#ffd966'); }
+    } else {
+      KITCHEN.t += dt;
+      if (KITCHEN.t >= 20) { KITCHEN.t = 0; FOOD.stock = Math.min(10, FOOD.stock + 1); }
+    }
+  }
+  function cleanSeats() {
+    for (const s of SEATS) if (s.user && (s.user.dead || !s.user.meal || s.user.meal.seat !== s)) s.user = null;
+  }
+  // Nunca dejan una entrada sola: solo sale un guardia si su compañero de entrada está en su puesto
+  function slotPartner(u) {
+    const s = u.slot;
+    if (!s || s < 1) return null;
+    const p = s % 2 === 1 ? s + 1 : s - 1;
+    return player.find(q => q.slot === p) || null;
+  }
+  function canLeavePost(u) {
+    if (u.homeMode !== 'base' || !u.slot || u.slot < 1) return true;
+    const partner = slotPartner(u);
+    if (!partner || partner.dead) return false;
+    return !(partner.meal && partner.meal.state !== 'idle');
+  }
+  function releaseMeal(u, returning) {
+    const m = u.meal;
+    if (m.seat && m.seat.user === u) m.seat.user = null;
+    m.seat = null;
+    m.timer = 45 + rand() * 45;
+    m.state = returning ? 'returning' : 'idle';
+    m.t = 0;
+  }
+  // Comidas escalonadas: cada soldado tiene su propio reloj. Devuelve true si el soldado está comiendo o yendo a la fogata
+  function mealUpdate(u, dt) {
+    if (!u.meal) u.meal = { state: 'idle', timer: 30 + rand() * 50, seat: null, t: 0 };
+    const m = u.meal;
+    if (u.ctrl || alert.active) {
+      if (m.state !== 'idle') releaseMeal(u, false);
+      return false;
+    }
+    if (m.state === 'idle') {
+      m.timer -= dt;
+      if (m.timer > 0 || !canLeavePost(u)) return false;
+      const seat = SEATS.find(s => !s.user);
+      if (!seat) return false;
+      seat.user = u; m.seat = seat; m.state = 'going';
+    }
+    const sp = WEAPONS[u.weapon].speed * 0.7;
+    if (m.state === 'going') {
+      const dx = m.seat.x - u.x, dy = m.seat.y - u.y, d = Math.hypot(dx, dy);
+      if (d < 8) { m.state = 'eating'; m.t = 0; return true; }
+      const p = navPoint(u, m.seat), px = p.x - u.x, py = p.y - u.y, pd = Math.hypot(px, py) || 1;
+      u.vx = px / pd * sp; u.vy = py / pd * sp;
+      return true;
+    }
+    if (m.state === 'eating') {
+      m.t += dt;
+      u.f = Math.atan2(FIRE.y - u.y, FIRE.x - u.x);
+      if (m.t >= 4) {
+        if (FOOD.stock > 0) { FOOD.stock--; u.hungry = false; }
+        else u.hungry = true;
+        releaseMeal(u, true);
+      }
+      return true;
+    }
+    // volviendo a su puesto
+    const h = homePos(u), dx = h.x - u.x, dy = h.y - u.y, d = Math.hypot(dx, dy);
+    if (d < 10) { m.state = 'idle'; return false; }
+    const p = navPoint(u, h), px = p.x - u.x, py = p.y - u.y, pd = Math.hypot(px, py) || 1;
+    u.vx = px / pd * sp; u.vy = py / pd * sp;
+    return true;
+  }
+  function drawField(f) {
+    ctx.fillStyle = 'rgba(0,0,0,0.2)';
+    ctx.fillRect(f.x + 4, f.y + 6, f.w, f.h);
+    ctx.fillStyle = '#5a3d22'; ctx.fillRect(f.x, f.y, f.w, f.h);
+    ctx.strokeStyle = '#3f2a16'; ctx.lineWidth = 2; ctx.strokeRect(f.x, f.y, f.w, f.h);
+    const ripe = f.t >= 60, g = Math.min(1, f.t / 60);
+    for (let row = 0; row < 4; row++) {
+      const y = f.y + 14 + row * 27;
+      ctx.strokeStyle = '#3f2a16'; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(f.x + 4, y + 10); ctx.lineTo(f.x + f.w - 4, y + 10); ctx.stroke();
+      for (let col = 0; col < 9; col++) {
+        const x = f.x + 12 + col * 19, h = 3 + g * 12;
+        ctx.strokeStyle = ripe ? '#d9b54a' : '#5a9a3a'; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(x, y + 10); ctx.lineTo(x, y + 10 - h); ctx.stroke();
+        if (g > 0.3) {
+          ctx.fillStyle = ripe ? '#f0d060' : '#78b84a';
+          ctx.beginPath(); ctx.ellipse(x - 2, y + 10 - h, 2, 3, 0, 0, TAU); ctx.fill();
+        }
+      }
+    }
+    if (!ripe) {
+      ctx.fillStyle = '#ffd9a0'; ctx.font = 'bold 10px system-ui, sans-serif'; ctx.textAlign = 'center';
+      ctx.fillText('Creciendo ' + Math.ceil(60 - f.t) + ' s', f.x + f.w / 2, f.y - 6);
+      ctx.textAlign = 'left';
+    }
+  }
+  function drawKitchen(k, t) {
+    if (!k.built) return;
+    ctx.fillStyle = 'rgba(0,0,0,0.3)'; ctx.fillRect(k.x - 22, k.y - 4, 50, 20);
+    ctx.fillStyle = '#7a5230'; ctx.fillRect(k.x - 24, k.y - 22, 48, 26);
+    ctx.fillStyle = '#5b3d24';
+    for (let x = k.x - 18; x < k.x + 24; x += 9) ctx.fillRect(x, k.y - 20, 1.5, 22);
+    ctx.fillStyle = '#8a6a3a';
+    ctx.beginPath(); ctx.moveTo(k.x - 30, k.y - 22); ctx.lineTo(k.x, k.y - 40); ctx.lineTo(k.x + 30, k.y - 22); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#2a2a2a'; ctx.fillRect(k.x + 14, k.y - 46, 6, 14);
+    // olla sobre la lumbre
+    ctx.fillStyle = '#1e1e1e';
+    ctx.beginPath(); ctx.ellipse(k.x + 4, k.y + 20, 9, 5, 0, 0, TAU); ctx.fill();
+    ctx.strokeStyle = 'rgba(230,230,230,0.5)'; ctx.lineWidth = 1.5;
+    for (let i = 0; i < 2; i++) {
+      const sx = k.x + 2 + i * 5, sy = k.y + 10 - ((t * 20 + i * 9) % 14);
+      ctx.beginPath(); ctx.moveTo(sx, k.y + 12); ctx.quadraticCurveTo(sx + 3, sy + 4, sx, sy); ctx.stroke();
+    }
   }
 
   function drawHay(x, y, s) {
@@ -979,6 +1118,8 @@
     updateHorse();
     updateDummies(dt);
     updateCamp(dt);
+    updateEconomy(dt);
+    cleanSeats();
     const mx = cam.x + (mouse.x - W / 2) / zoom;
     const my = cam.y + (mouse.y - H / 2) / zoom;
 
@@ -1015,7 +1156,7 @@
         }
       } else {
         u.blocking = u.blockT > 0;
-        if (u.team === 'player' && u.mode !== 'attack') guardThink(u, dt);
+        if (u.team === 'player' && u.mode !== 'attack') { if (!mealUpdate(u, dt)) guardThink(u, dt); }
         else if (u.team === 'enemy') enemyThink(u, dt);
         else think(u, dt);
       }
@@ -1399,6 +1540,13 @@
     ctx.beginPath(); ctx.arc(10, -22 + bob, 2, 0, TAU); ctx.fill();
     ctx.restore();
 
+    // indicadores de comida
+    if (u.meal && u.meal.state === 'eating' || u.hungry) {
+      ctx.fillStyle = u.hungry && !(u.meal && u.meal.state === 'eating') ? '#ff9a6a' : '#ffd9a0';
+      ctx.font = 'bold 10px system-ui, sans-serif'; ctx.textAlign = 'center';
+      ctx.fillText(u.meal && u.meal.state === 'eating' ? 'comiendo' : 'hambre', u.x, u.y + 16);
+      ctx.textAlign = 'left';
+    }
     // barra de vida y marcador del soldado controlado
     if (u.hp < 100 || u.ctrl) {
       ctx.fillStyle = 'rgba(0,0,0,0.6)';
@@ -1627,6 +1775,7 @@
     for (const s of SEATS) items.push(s);
     for (const d of DUMMIES) items.push(d);
     items.push(...TENTS, CATA, CAMP_FIRE);
+    items.push(FIELD, KITCHEN);
     for (const b of BOULDERS) items.push(b);
     for (const p of PITS) items.push(p);
     if (!horse.rider) items.push(horse);
@@ -1645,6 +1794,8 @@
       else if (it.type === 'cata') drawCata(it);
       else if (it.type === 'campfire') drawCampFire(it, t);
       else if (it.type === 'boulder') drawBoulder(it);
+      else if (it.type === 'field') drawField(it);
+      else if (it.type === 'kitchen') drawKitchen(it, t);
       else if (it.type === 'horse') drawHorseAt(it.x, it.y, it.f, t, it.moving);
       else drawUnit(it, t);
     }
@@ -1676,7 +1827,7 @@
     hud.innerHTML =
       `<b>Controlas:</b> ${WEAPONS[control.weapon].name} · vida ${Math.ceil(control.hp)}` +
       `${control.blocking ? ' · <b>bloqueando</b>' : ''}<br>` +
-      `Tu escuadra (azul): ${pa}/${player.length} · Enemigo (rojo): ${ea}/5<br>` +
+      `Tu escuadra (azul): ${pa}/${player.length} · Enemigo (rojo): ${ea} · Comida: ${FOOD.stock}<br>` +
       `<span class="keyhelp">WASD mover · Mouse apuntar · Clic izq. atacar · Mantén clic der. defender · ` +
       `E escuadra atacar · R fogata · B base · Tab cambiar soldado · 1-5 o G estante · M montar · Rueda zoom</span>` +
       `<span class="touchhelp">Joystick: mover · Botones: atacar, defender y órdenes a tu escuadra</span>`;
