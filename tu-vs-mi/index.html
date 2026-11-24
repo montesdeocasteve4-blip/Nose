@@ -42,6 +42,7 @@
   #ring .b-def { width: 74px; height: 74px; right: 143px; bottom: 95px; border-color: rgba(150,200,255,.6); }
   #ring .b-rack { width: 56px; height: 56px; right: 98px; bottom: 154px; font-size: 10px; }
   #ring .b-squad { width: 60px; height: 60px; right: 24px; bottom: 137px; font-size: 10px; }
+  #ring .b-base { width: 58px; height: 58px; right: 128px; bottom: 15px; font-size: 11px; }
   #zoombtn { position: fixed; top: calc(max(10px, env(safe-area-inset-top, 0px)) + 96px); right: max(10px, env(safe-area-inset-right, 0px));
           width: 40px; height: 40px; font-size: 10px; }
   #rack { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(92vw, 360px); max-height: 80vh; overflow: auto;
@@ -71,6 +72,7 @@
     <button data-act="block" class="b-def">Defender</button>
     <button data-act="rack" class="b-rack">Armas</button>
     <button data-act="squad" class="b-squad">Esc.: ataque</button>
+    <button data-act="base" class="b-base">Base</button>
   </div>
   <button data-act="zoom" id="zoombtn">Zoom</button>
 </div>
@@ -263,6 +265,15 @@
   const ENEMY_POS = [[2870, 1830], [2930, 1885], [2870, 1940], [2930, 1995], [2870, 2050]];
 
   let units = [], player = [], enemy = [], effects = [], arrows = [];
+  // Alarma: un soldado que ve enemigos llama a la escuadra y evitan el combate hasta reunirse
+  let alert = { active: false, phase: 'idle', caller: null, t: 0 };
+  const DETECT_R = 240, GATHER_R = 120, ALERT_R = 360;
+  // Puntos de guardia dentro de la muralla, uno por entrada
+  const GATE_GUARD = [
+    { x: FMX, y: FY0 + FORT_T + 50 },
+    { x: FMX, y: FY1 - FORT_T - 50 },
+    { x: FX1 - FORT_T - 50, y: FMY }
+  ];
   let control = null, ended = null;
   const mouse = { x: 0, y: 0 };
   let rmb = false;
@@ -274,7 +285,7 @@
 
   function makeUnit(team, weapon, x, y, f, mode) {
     return {
-      team, weapon, x, y, f, mode,
+      team, weapon, x, y, f, mode, homeMode: mode,
       hp: 100, dead: false,
       cd: 0, swing: 0, swingTotal: 0, hitDone: false,
       target: null, aiT: 0, blockT: 0, blocking: false,
@@ -290,7 +301,8 @@
   }
 
   function reset() {
-    player = SPAWN_PLAYER.map((w, i) => makeUnit('player', w, 300, 1100 + (i - 2) * 120, 0, 'defend'));
+    player = SPAWN_PLAYER.map((w, i) => makeUnit('player', w, 300, 1100 + (i - 2) * 120, 0, 'fogata'));
+    alert = { active: false, phase: 'idle', caller: null, t: 0 };
     enemy = SPAWN_ENEMY.map((w, i) => makeUnit('enemy', w, ENEMY_POS[i][0], ENEMY_POS[i][1], Math.PI, 'attack'));
     units = [...player, ...enemy];
     effects = [];
@@ -340,7 +352,8 @@
   }
 
   function findTarget(u) {
-    const limit = u.team === 'enemy' ? 700 : (u.mode === 'attack' ? Infinity : 300);
+    const engaging = alert.active && alert.phase === 'engage';
+    const limit = u.team === 'enemy' ? 700 : (u.mode === 'attack' || engaging ? Infinity : 300);
     let best = null, bd = limit;
     for (const e of units) {
       if (e.team === u.team || e.dead) continue;
@@ -395,7 +408,88 @@
     }
   }
 
+  // ---------- Fogata, base y alarma de la escuadra ----------
+  function nearestEnemy(u) {
+    let best = null, bd = Infinity;
+    for (const e of units) {
+      if (e.team === u.team || e.dead) continue;
+      const d = Math.hypot(e.x - u.x, e.y - u.y);
+      if (d < bd) { bd = d; best = e; }
+    }
+    return best;
+  }
+  function squadGroup() { return player.filter(p => !p.ctrl && !p.dead); }
+  // Puesto de guardia: en modo Base, tres vigilan las entradas; el resto rodea la fogata
+  function homePos(u) {
+    const i = squadGroup().indexOf(u);
+    if (u.homeMode === 'base' && i >= 0 && i < 3) return GATE_GUARD[i];
+    const ang = (Math.max(0, i) / 4) * TAU + Math.PI / 4;
+    return { x: FIRE.x + Math.cos(ang) * 85, y: FIRE.y + Math.sin(ang) * 85 };
+  }
+  function alertCenter() { return alert.caller && !alert.caller.dead ? alert.caller : FIRE; }
+  function startAlert(caller) {
+    alert = { active: true, phase: 'gather', caller, t: 0 };
+    addEffect(caller.x, caller.y - 60, '¡ALARMA!', '#ff6b6b');
+  }
+  function endAlert() {
+    alert.active = false; alert.phase = 'idle';
+    for (const g of squadGroup()) g.mode = g.homeMode;
+  }
+  function updateAlert(dt) {
+    if (!alert.active) return;
+    alert.t += dt;
+    const group = squadGroup();
+    if (group.length === 0) { alert.active = false; return; }
+    const c = alertCenter();
+    const threat = enemy.some(e => !e.dead && group.some(g => Math.hypot(e.x - g.x, e.y - g.y) < ALERT_R));
+    if (!threat && alert.t > 3) { endAlert(); return; }
+    if (alert.phase === 'gather') {
+      const ready = group.every(g => Math.hypot(g.x - c.x, g.y - c.y) <= GATHER_R);
+      if (ready || alert.t > 25) {
+        alert.phase = 'engage';
+        for (const g of group) g.mode = 'attack';
+      }
+    }
+  }
+  // Mientras se reúnen: se retiran de los enemigos cercanos y no atacan
+  function gatherMove(u) {
+    const c = alertCenter();
+    const e = nearestEnemy(u);
+    const de = e ? Math.hypot(e.x - u.x, e.y - u.y) : Infinity;
+    const sp = WEAPONS[u.weapon].speed * 0.8;
+    if (e && de < 120) {
+      const dx = u.x - e.x, dy = u.y - e.y, d = de || 1;
+      u.vx = dx / d * sp; u.vy = dy / d * sp;
+      u.f = Math.atan2(e.y - u.y, e.x - u.x);
+      return;
+    }
+    if (Math.hypot(c.x - u.x, c.y - u.y) > GATHER_R * 0.6) {
+      const p = navPoint(u, c), dx = p.x - u.x, dy = p.y - u.y, d = Math.hypot(dx, dy) || 1;
+      u.vx = dx / d * sp; u.vy = dy / d * sp;
+    } else if (e) {
+      u.f = Math.atan2(e.y - u.y, e.x - u.x);
+    }
+  }
+  function guardThink(u, dt) {
+    if (!alert.active) {
+      const e = nearestEnemy(u);
+      if (e && Math.hypot(e.x - u.x, e.y - u.y) <= DETECT_R) startAlert(u);
+    }
+    if (alert.active && alert.phase === 'engage') { think(u, dt); return; }
+    if (alert.active) { gatherMove(u); return; }
+    const h = homePos(u);
+    if (Math.hypot(h.x - u.x, h.y - u.y) > 10) {
+      const p = navPoint(u, h), dx = p.x - u.x, dy = p.y - u.y, d = Math.hypot(dx, dy) || 1;
+      const sp = WEAPONS[u.weapon].speed * 0.7;
+      u.vx = dx / d * sp; u.vy = dy / d * sp;
+    } else {
+      const e = nearestEnemy(u);
+      if (e) u.f = Math.atan2(e.y - u.y, e.x - u.x);
+    }
+  }
+
   function updateUnits(dt) {
+    updateAlert(dt);
     const mx = cam.x + (mouse.x - W / 2) / zoom;
     const my = cam.y + (mouse.y - H / 2) / zoom;
 
@@ -432,7 +526,8 @@
         }
       } else {
         u.blocking = u.blockT > 0;
-        think(u, dt);
+        if (u.team === 'player' && u.mode !== 'attack') guardThink(u, dt);
+        else think(u, dt);
       }
 
       let k = 1;
@@ -551,47 +646,48 @@
     }
   }
 
-  // ---------- Dibujo de la muralla de troncos ----------
-  function drawLog(x, y, w, h, shade) {
-    ctx.fillStyle = shade ? '#8a6238' : '#6b4a2b';
-    ctx.fillRect(x, y, w, h);
-    ctx.fillStyle = 'rgba(255,220,160,0.18)';
-    ctx.fillRect(x, y + 1, w, h * 0.25);
-    ctx.strokeStyle = '#3f2a16'; ctx.lineWidth = 1;
-    ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
-  }
-  function logEnd(cx, cy, r) {
-    ctx.fillStyle = '#c49a64';
-    ctx.beginPath(); ctx.arc(cx, cy, r, 0, TAU); ctx.fill();
-    ctx.strokeStyle = '#3f2a16'; ctx.lineWidth = 1; ctx.stroke();
-    ctx.strokeStyle = 'rgba(90,60,30,0.6)';
-    ctx.beginPath(); ctx.arc(cx, cy, r * 0.5, 0, TAU); ctx.stroke();
-  }
+  // ---------- Dibujo de la barricada (estacas y tablones apilados) ----------
   function drawWall(w) {
+    const horiz = w.w >= w.h;
+    const L = horiz ? w.w : w.h, T = horiz ? w.h : w.w;
+    let s = (Math.floor(w.x * 13.7 + w.y * 7.3 + w.w) >>> 0) || 1;
+    const r = () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; };
+    ctx.save();
+    if (horiz) ctx.translate(w.x, w.y);
+    else { ctx.translate(w.x + w.w, w.y); ctx.rotate(Math.PI / 2); }
     ctx.fillStyle = 'rgba(0,0,0,0.3)';
-    ctx.fillRect(w.x + 5, w.y + 8, w.w, w.h);
-    const L = 26;
-    if (w.w >= w.h) {
-      // Muro horizontal: dos hileras de troncos apilados
-      const rh = w.h / 2;
-      for (let r = 0; r < 2; r++) {
-        for (let x = w.x, i = 0; x < w.x + w.w; x += L, i++) {
-          drawLog(x, w.y + r * rh, Math.min(L, w.x + w.w - x), rh, (i + r) % 2 === 0);
-        }
-        logEnd(w.x, w.y + r * rh + rh / 2, rh / 2 - 1);
-        logEnd(w.x + w.w, w.y + r * rh + rh / 2, rh / 2 - 1);
-      }
-    } else {
-      // Muro vertical
-      const cw = w.w / 2;
-      for (let c = 0; c < 2; c++) {
-        for (let y = w.y, i = 0; y < w.y + w.h; y += L, i++) {
-          drawLog(w.x + c * cw, y, cw, Math.min(L, w.y + w.h - y), (i + c) % 2 === 0);
-        }
-        logEnd(w.x + c * cw + cw / 2, w.y, cw / 2 - 1);
-        logEnd(w.x + c * cw + cw / 2, w.y + w.h, cw / 2 - 1);
-      }
+    ctx.fillRect(3, 6, L, T);
+    // estacas afiladas que sobresalen
+    ctx.fillStyle = '#5b3d24';
+    for (let x = 4; x < L; x += 18 + r() * 16) {
+      const h = 12 + r() * 12, lean = (r() - 0.5) * 8;
+      ctx.beginPath(); ctx.moveTo(x - 4, 3); ctx.lineTo(x + lean, -h); ctx.lineTo(x + 4, 3); ctx.closePath(); ctx.fill();
     }
+    // tablones de distintos anchos y alturas, algunos rotos
+    const shades = ['#7a5230', '#8a6238', '#6b4a2b', '#5e4026'];
+    for (let x = 0; x < L;) {
+      const pw = 10 + r() * 9, top = r() * T * 0.14, bot = T - r() * T * 0.14;
+      if (r() < 0.07) { ctx.fillStyle = '#140d06'; ctx.fillRect(x, 0, pw, T); }
+      else {
+        ctx.fillStyle = shades[Math.floor(r() * shades.length)];
+        ctx.fillRect(x, top, pw, bot - top);
+        ctx.strokeStyle = '#2e1e0f'; ctx.lineWidth = 1;
+        ctx.strokeRect(x + 0.5, top + 0.5, pw - 1, bot - top - 1);
+        ctx.fillStyle = 'rgba(255,220,160,0.14)';
+        ctx.fillRect(x + pw * 0.25, top + 2, 1.5, bot - top - 4);
+      }
+      x += pw;
+    }
+    // travesaños con clavos
+    ctx.fillStyle = '#4a3220';
+    ctx.fillRect(0, T * 0.22, L, 4);
+    ctx.fillRect(0, T * 0.66, L, 4);
+    ctx.fillStyle = '#1e140a';
+    for (let x = 8; x < L; x += 36) {
+      ctx.beginPath(); ctx.arc(x, T * 0.22 + 2, 1.3, 0, TAU); ctx.fill();
+      ctx.beginPath(); ctx.arc(x + 18, T * 0.66 + 2, 1.3, 0, TAU); ctx.fill();
+    }
+    ctx.restore();
   }
 
   // ---------- Dibujo del estante de armas ----------
@@ -806,6 +902,7 @@
     else if (k === 'g') toggleRack();
     else if (k === 'e') orderAttack();
     else if (k === 'r') orderDefend();
+    else if (k === 'b') orderBase();
     else if (k === 'tab') cycleControl();
   });
   window.addEventListener('keyup', e => keys.delete(e.key.toLowerCase()));
@@ -833,8 +930,16 @@
   over.addEventListener('click', reset);
 
   // ---------- Órdenes compartidas (teclado y botones) ----------
-  function orderAttack() { for (const p of player) if (!p.dead) p.mode = 'attack'; }
-  function orderDefend() { for (const p of player) if (!p.dead) p.mode = 'defend'; }
+  // Órdenes de escuadra: recuerdan el modo base; durante una alarma se aplican al terminarla
+  function setOrder(m) {
+    for (const p of squadGroup()) {
+      p.homeMode = m;
+      if (!alert.active || alert.phase === 'engage') p.mode = m;
+    }
+  }
+  function orderAttack() { setOrder('attack'); }
+  function orderDefend() { setOrder('fogata'); }
+  function orderBase() { setOrder('base'); }
   function cycleControl() {
     const alive = player.filter(p => !p.dead);
     if (alive.length) setControl(alive[(alive.indexOf(control) + 1) % alive.length]);
@@ -871,11 +976,11 @@
   }
 
   // Órdenes de escuadra con un solo botón
-  function squadAttacking() { return player.some(p => !p.dead && !p.ctrl && p.mode === 'attack'); }
-  function toggleSquad() { if (squadAttacking()) orderDefend(); else orderAttack(); setSquadLabel(); }
+  function homeOrder() { const g = squadGroup()[0]; return g ? g.homeMode : 'fogata'; }
+  function toggleSquad() { if (homeOrder() === 'attack') orderDefend(); else orderAttack(); setSquadLabel(); }
   function setSquadLabel() {
     const b = document.querySelector('#ring .b-squad');
-    if (b) b.textContent = squadAttacking() ? 'Esc.: ataque' : 'Esc.: defensa';
+    if (b) b.textContent = homeOrder() === 'attack' ? 'Esc.: ataque' : 'Esc.: fogata';
   }
   rack.addEventListener('click', e => {
     const b = e.target.closest('button');
@@ -946,6 +1051,7 @@
       if (act === 'attack') {
         if (control && !control.dead) doAttack(control);
       } else if (act === 'squad') toggleSquad();
+      else if (act === 'base') orderBase();
       else if (act === 'rack') toggleRack();
       else if (act === 'zoom') { zoomIdx = (zoomIdx + 1) % ZOOMS.length; zoom = ZOOMS[zoomIdx]; clampCamera(); }
     });
@@ -1007,7 +1113,7 @@
       `${control.blocking ? ' · <b>bloqueando</b>' : ''}<br>` +
       `Tu escuadra (azul): ${pa}/5 · Enemigo (rojo): ${ea}/5<br>` +
       `<span class="keyhelp">WASD mover · Mouse apuntar · Clic izq. atacar · Mantén clic der. defender · ` +
-      `E escuadra atacar · R escuadra defender · Tab cambiar soldado · 1-5 o G estante de armas · Rueda zoom</span>` +
+      `E escuadra atacar · R fogata · B base · Tab cambiar soldado · 1-5 o G estante de armas · Rueda zoom</span>` +
       `<span class="touchhelp">Joystick: mover · Botones: atacar, defender y órdenes a tu escuadra</span>`;
   }
 
