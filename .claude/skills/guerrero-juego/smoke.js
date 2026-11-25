@@ -23,8 +23,8 @@ for(let i=0;i<3;i++){await p.keyboard.press('KeyJ');await p.waitForTimeout(i==2?
 await p.waitForTimeout(700);await p.evaluate('P.st=100;P.cd=0');await p.keyboard.press('Space');await p.waitForTimeout(20);
 out.combate=[pasos.join(''),await p.evaluate('(hurt(10,1,0),P.perfect>0)')];
 // meteoro
-await p.evaluate('SV.met=true;P.mcd=0;P.st=100;P.y=200;P.hp=P.max;en.length=0;en.push(mkE(0,P.x+100,FLOOR-40,1));en[0].cd=99');await p.keyboard.press('KeyH');await p.waitForTimeout(900);
-out.meteoro=await p.evaluate('[P.slam,Math.round(en[0]?en[0].hp:-1),en[0]?en[0].stun>0:null]');
+await p.evaluate('SV.met=true;P.mcd=0;P.st=100;P.y=200;P.hp=P.max;en.length=0;en.push(mkE(0,P.x+260,P.y-150,1));en[0].cd=99');await p.keyboard.press('KeyH');await p.waitForTimeout(1600);
+out.meteoro=await p.evaluate('[mets.length,en.length]');
 // bestiario pausa y reanuda
 await p.click('#bt');out.bes=[await p.evaluate('paused'),await p.evaluate('$("bes").style.display')];await p.screenshot({path:dir+'/bestiario.png'});await p.click('#bx');out.bes.push(await p.evaluate('paused'));
 // fin de oleada: aviso, pausa y panel único solo en oleadas pares; sin panel el juego sigue solo
@@ -35,6 +35,10 @@ await p.evaluate('en.length=0;wave=2;P.inv=99;wavePending=false;cleared=false');
 out.panel=await p.evaluate('[choosing,cur.length,merc.length]');await p.waitForTimeout(700);await p.screenshot({path:dir+'/panel.png'});
 await p.click('#cards [data-i="0"]');await p.click('#cards [data-m="0"]');out.compra=await p.evaluate('[!!picked,P.gold<200,Math.round(P.hp)>40]');
 await p.click('#cards .go');await p.waitForTimeout(200);out.cierra=await p.evaluate('[choosing,wavePending]');await p.waitForTimeout(2600);out.sigue=await p.evaluate('[wave,en.length>0]');
+// modos y armas
+await p.evaluate('SV.st.bosses=1;SV.mode="boss";reset();waveT=0');await p.waitForTimeout(500);out.modoJefes=await p.evaluate('en.some(e=>e.type>=6)');
+await p.evaluate('SV.mode="daily";reset();P.inv=99;waveT=0');await p.waitForTimeout(500);out.modoDia=await p.evaluate('mod===DAILY');
+await p.evaluate('SV.mode="surv";SV.wu=[true,true,true];setWeapon(1);reset();P.inv=99');out.arma=await p.evaluate('[WP.n,ACOST[0],WP.reach[2]]');await p.evaluate('setWeapon(0)');
 // revivir, muerte y menú
 await p.evaluate('P.revive=1;P.hp=0');await p.waitForTimeout(250);out.revive=await p.evaluate('[dead,Math.round(P.hp)]');
 await p.evaluate('P.hp=0');await p.waitForTimeout(400);out.menuTarda=await p.evaluate('$("over").classList.contains("on")');await p.waitForTimeout(1600);out.muerte=await p.evaluate('[dead,SV.souls>0,SV.st.runs,$("over").classList.contains("on")]');await p.screenshot({path:dir+'/menu.png'});
