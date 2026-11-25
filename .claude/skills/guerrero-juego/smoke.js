@@ -6,8 +6,17 @@ const open=async(w,h,touch)=>{const c=await b.newContext({viewport:{width:w,heig
 const p=await open(1100,620,false);await p.click('#over .go');await p.waitForTimeout(2200);
 out.inicio=await p.evaluate('[wave,en.length,Math.round(P.hp),P.gold]');
 // todos los tipos de enemigo, 3 s de IA real, sin NaN
-out.tipos=await p.evaluate(`en.length=0;wave=8;wavePending=false;for(let t=0;t<7;t++)en.push(mkE(t,P.x-500+t*160,P.y-60-(t%2)*100,1));P.inv=99;P.hp=P.max;1`);
+out.tipos=await p.evaluate(`en.length=0;wave=8;wavePending=false;for(let t=0;t<8;t++)en.push(mkE(t,P.x-560+t*150,P.y-60-(t%2)*100,1));P.inv=99;P.hp=P.max;1`);
 await p.waitForTimeout(3000);out.ia=await p.evaluate('[en.length,en.every(e=>isFinite(e.x)&&isFinite(e.y)),en.map(e=>e.type+e.st[0]).join()]');await p.screenshot({path:dir+'/tipos.png'});
+// poder: gasta aguante, recarga y no se puede spamear
+await p.evaluate('en.length=0;wavePending=true;waveT=99;P.inv=99;P.st=100;P.pcd=0;P.charge=0');await p.keyboard.down('KeyK');await p.waitForTimeout(1700);await p.keyboard.up('KeyK');await p.waitForTimeout(100);
+out.poder=await p.evaluate('[Math.round(P.st),P.pcd>5]');await p.keyboard.down('KeyK');await p.waitForTimeout(400);out.poder.push(await p.evaluate('P.charge'));await p.keyboard.up('KeyK');
+// modificadores y ejecución
+await p.evaluate('mod="rain";hazT=0;en.length=0;en.push(mkE(0,P.x+4000,P.y,1))');await p.waitForTimeout(1500);out.lluvia=await p.evaluate('haz.length>0');
+await p.evaluate('mod=null;haz.length=0;en.length=0;const x=mkE(0,P.x+90,P.y-20*K,-1);x.cd=99;x.stun=2;x.hp=x.max=500;en.push(x);P.f=1;P.st=50;P.step=-1;P.chainT=0;P.atk=0;P.acd=0;P.charge=0;P.pcd=0');
+await p.keyboard.press('KeyJ');await p.waitForTimeout(250);out.ejecucion=await p.evaluate('[SV.st.exec,Math.round(500-en[0].hp)]');
+// tope del Elixir: sin Reliquia si no queda nada por mejorar
+await p.evaluate('P.stB=45;for(const u of UPG)cnt[u.k]=u.max;en.length=0;openPanel()');out.merc=await p.evaluate('merc.map(m=>m.k).join()');await p.evaluate('closePanel();cnt={};P.stB=0;recalc()');
 // combate: cadena, aguante, esquiva perfecta
 await p.evaluate('en.length=0;wavePending=true;waveT=99;P.inv=0;P.st=100;P.step=-1;P.chainT=0;P.hp=P.max');const pasos=[];
 for(let i=0;i<3;i++){await p.keyboard.press('KeyJ');await p.waitForTimeout(i==2?60:200);pasos.push(await p.evaluate('P.step'))}
