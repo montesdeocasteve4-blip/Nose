@@ -3,7 +3,7 @@ const {chromium}=require('playwright');const dir=process.argv[2]||'/tmp/gj',url=
 (async()=>{const b=await chromium.launch(),err=[],out={};
 const open=async(w,h,touch)=>{const c=await b.newContext({viewport:{width:w,height:h},hasTouch:touch,isMobile:touch,deviceScaleFactor:1}),p=await c.newPage();
  p.on('pageerror',e=>err.push(e.message));p.on('console',m=>m.type()==='error'&&!/fonts|ERR_/.test(m.text())&&err.push(m.text()));await p.goto(url);await p.waitForTimeout(500);return p};
-const p=await open(1100,620,false);await p.click('#go');await p.waitForTimeout(2200);
+const p=await open(1100,620,false);await p.click('#over .go');await p.waitForTimeout(2200);
 out.inicio=await p.evaluate('[wave,en.length,Math.round(P.hp),P.gold]');
 // todos los tipos de enemigo, 3 s de IA real, sin NaN
 out.tipos=await p.evaluate(`en.length=0;wave=8;wavePending=false;for(let t=0;t<7;t++)en.push(mkE(t,P.x-500+t*160,P.y-60-(t%2)*100,1));P.inv=99;P.hp=P.max;1`);
@@ -18,14 +18,18 @@ await p.evaluate('SV.met=true;P.mcd=0;P.st=100;P.y=200;P.hp=P.max;en.length=0;en
 out.meteoro=await p.evaluate('[P.slam,Math.round(en[0]?en[0].hp:-1),en[0]?en[0].stun>0:null]');
 // bestiario pausa y reanuda
 await p.click('#bt');out.bes=[await p.evaluate('paused'),await p.evaluate('$("bes").style.display')];await p.screenshot({path:dir+'/bestiario.png'});await p.click('#bx');out.bes.push(await p.evaluate('paused'));
-// oro -> cartas -> mercader
-await p.evaluate('en.length=0;P.gold=200;P.hp=40;wavePending=false;waveT=99');await p.waitForTimeout(300);out.cartas=await p.evaluate('[choosing,shopOpen,cur.length]');await p.screenshot({path:dir+'/cartas.png'});
-await p.keyboard.press('Digit1');await p.waitForTimeout(100);out.mercader=await p.evaluate('[choosing,shopOpen,merc.length]');await p.screenshot({path:dir+'/mercader.png'});
-await p.keyboard.press('Digit1');out.pocion=await p.evaluate('[Math.round(P.hp),P.gold]');await p.keyboard.press('Enter');await p.waitForTimeout(100);out.sigue=await p.evaluate('[choosing,wavePending]');
+// fin de oleada: aviso, pausa y panel único solo en oleadas pares; sin panel el juego sigue solo
+await p.evaluate('en.length=0;P.gold=200;P.hp=40;P.inv=99;wave=1;wavePending=false;cleared=false');await p.waitForTimeout(900);
+out.pausa=await p.evaluate('[choosing,cleared]');await p.waitForTimeout(1500);out.sinPanel=await p.evaluate('[choosing,wavePending]');
+await p.waitForTimeout(3000);out.auto=await p.evaluate('[wave,en.length>0]');
+await p.evaluate('en.length=0;wave=2;P.inv=99;wavePending=false;cleared=false');await p.waitForTimeout(900);out.antes=await p.evaluate('choosing');await p.waitForTimeout(1300);
+out.panel=await p.evaluate('[choosing,cur.length,merc.length]');await p.waitForTimeout(700);await p.screenshot({path:dir+'/panel.png'});
+await p.click('#cards [data-i="0"]');await p.click('#cards [data-m="0"]');out.compra=await p.evaluate('[!!picked,P.gold<200,Math.round(P.hp)>40]');
+await p.click('#cards .go');await p.waitForTimeout(200);out.cierra=await p.evaluate('[choosing,wavePending]');await p.waitForTimeout(2600);out.sigue=await p.evaluate('[wave,en.length>0]');
 // revivir, muerte y menú
 await p.evaluate('P.revive=1;P.hp=0');await p.waitForTimeout(250);out.revive=await p.evaluate('[dead,Math.round(P.hp)]');
-await p.evaluate('P.hp=0');await p.waitForTimeout(300);out.muerte=await p.evaluate('[dead,SV.souls>0,SV.st.runs]');await p.screenshot({path:dir+'/menu.png'});
+await p.evaluate('P.hp=0');await p.waitForTimeout(400);out.menuTarda=await p.evaluate('$("over").classList.contains("on")');await p.waitForTimeout(1600);out.muerte=await p.evaluate('[dead,SV.souls>0,SV.st.runs,$("over").classList.contains("on")]');await p.screenshot({path:dir+'/menu.png'});
 // logros y bestiario guardados
 out.logros=await p.evaluate('Object.keys(SV.ach).length');
-const m=await open(390,844,true);await m.tap('#go');await m.waitForTimeout(2000);await m.screenshot({path:dir+'/movil.png'});
+const m=await open(390,844,true);await m.tap('#over .go');await m.waitForTimeout(2000);await m.screenshot({path:dir+'/movil.png'});
 console.log(JSON.stringify(out),'ERR',err.length?err:'ninguno');await b.close()})()

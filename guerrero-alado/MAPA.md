@@ -1,102 +1,103 @@
-# MAPA de index.html (673 líneas). Leer antes de abrir el código.
+# MAPA de index.html (679 líneas). Leer antes de abrir el código.
 6 <style>
-110 </style></head><body>
-139 <script>
-144 const TOUCH
-147 // ---------- Sprites ----------
-148 function mk
-149 function radial
-152 const GLOW
-153 const HOT
-154 const SMOKE
-155 const GLOWG
-159 function feather
-164 const FBG
-166 // ---------- Fondo ----------
-167 function buildBg
-181 function resize
-185 // ---------- Escenario ----------
-191 function world
-213 // ---------- Jugador ----------
-217 const PAL
-218 const PALB
-219 function power
-220 function wing
-225 function body
-249 function warrior
-253 // ---------- Partículas ----------
-254 function spawnAura
-258 function spark
-259 function bolt
-262 // ---------- Progreso guardado ----------
-268 const SHOP
-271 const SPEC
-274 // ---------- Mejoras de partida
-276 function recalc
-280 const UPG
-289 // ---------- Enemigos ----------
-293 const REC
-294 const BEST
-304 function say
-305 function toast
-306 function discover
-307 function hit
-308 function num
-309 function mkE
-312 function spawnWave
-318 function drop
-319 function startWind
-320 function blinkE
-323 function dmgE
-331 function hurt
-336 function perfect
-339 // ---------- Acciones del jugador ----------
-340 const ACOST
-341 function useSt
-342 function tired
-343 function attack
-346 function doAttack
-350 function swingHit
-354 function dash
-357 function release
-362 function feathers
-366 // ---------- Menú, tienda y cartas ----------
-368 function syncAb
-369 const ACH
-375 function checkAch
-376 function dropCoins
-378 function showMenu
-393 function buy
-397 function openCards
-401 function pick
-410 function openShop
-412 function renderShop
-415 function buyM
-416 function closeShop
-417 function start
-418 function impact
-422 function meteor
-424 function toggleBes
-425 function renderBes
-428 function die
-432 function reset
-437 // ---------- Controles ----------
-440 function inp
-461 // ---------- Lógica ----------
-462 function updateEnemies
-524 function update
-553 // ---------- HUD ----------
-555 function setH
-556 function setAb
-558 function hud
-567 // ---------- Dibujo de enemigos ----------
-568 function tail
-569 function eye
-570 function rrect
-609 function tele
-616 function drawEnemy
-630 // ---------- Render ----------
-632 function drawFT
-634 function render
-670 function frame
-673 </script></body></html>
+115 </style></head><body>
+144 <script>
+149 const TOUCH
+152 // ---------- Sprites ----------
+153 function mk
+154 function radial
+157 const GLOW
+158 const HOT
+159 const SMOKE
+160 const GLOWG
+164 function feather
+169 const FBG
+171 // ---------- Fondo ----------
+172 function buildBg
+186 function resize
+190 // ---------- Escenario ----------
+196 function world
+218 // ---------- Jugador ----------
+222 const PAL
+223 const PALB
+224 function power
+225 function wing
+230 function body
+254 function warrior
+258 // ---------- Partículas ----------
+259 function spawnAura
+263 function spark
+264 function bolt
+267 // ---------- Progreso guardado ----------
+273 const SHOP
+276 const SPEC
+279 // ---------- Mejoras de partida
+281 function recalc
+285 const UPG
+294 // ---------- Enemigos ----------
+298 const REC
+299 const BEST
+309 function say
+310 function toast
+311 function discover
+312 function hit
+313 function num
+314 function mkE
+317 function spawnWave
+323 function drop
+324 function startWind
+325 function blinkE
+328 function dmgE
+336 function hurt
+341 function perfect
+344 // ---------- Acciones del jugador ----------
+345 const ACOST
+346 function useSt
+347 function tired
+348 function attack
+351 function doAttack
+355 function swingHit
+359 function dash
+362 function release
+367 function feathers
+371 // ---------- Menú, tienda y cartas ----------
+373 function syncAb
+374 const ACH
+380 function checkAch
+381 function dropCoins
+383 function showMenu
+398 function buy
+402 function rollCards
+411 function openPanel
+413 function renderPanel
+419 function pick
+420 function buyM
+421 function closePanel
+422 function waveEnd
+423 function start
+424 function impact
+428 function meteor
+430 function toggleBes
+431 function renderBes
+434 function die
+438 function reset
+443 // ---------- Controles ----------
+446 function inp
+467 // ---------- Lógica ----------
+468 function updateEnemies
+530 function update
+559 // ---------- HUD ----------
+561 function setH
+562 function setAb
+564 function hud
+573 // ---------- Dibujo de enemigos ----------
+574 function tail
+575 function eye
+576 function rrect
+615 function tele
+622 function drawEnemy
+636 // ---------- Render ----------
+638 function drawFT
+640 function render
+676 function frame
+679 </script></body></html>
