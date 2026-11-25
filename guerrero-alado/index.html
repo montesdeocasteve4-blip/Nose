@@ -1,27 +1,35 @@
 <!doctype html><html lang="es"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-capable" content="yes">
 <title>Guerrero Carmesí</title>
 <style>
-html,body{margin:0;height:100%;background:#000;overflow:hidden;touch-action:none;user-select:none;-webkit-user-select:none;font-family:system-ui,sans-serif}
-canvas{display:block;width:100vw;height:100vh}
-#hud{position:fixed;left:12px;top:10px;color:#f77;font-size:12px;opacity:.85;pointer-events:none;text-shadow:0 0 6px #f00}
-#bar{position:fixed;left:12px;top:30px;width:170px;height:7px;background:#2008;border:1px solid #a22;pointer-events:none}
+html,body{margin:0;height:100%;background:#000;overflow:hidden;touch-action:none;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;-webkit-tap-highlight-color:transparent;overscroll-behavior:none;font-family:system-ui,sans-serif}
+canvas{display:block;width:100vw;height:100vh;height:100dvh}
+#hud{position:fixed;left:max(12px,env(safe-area-inset-left));top:max(8px,env(safe-area-inset-top));color:#f77;font-size:12px;opacity:.85;pointer-events:none;text-shadow:0 0 6px #f00}
+#bar{position:fixed;left:max(12px,env(safe-area-inset-left));top:calc(max(8px,env(safe-area-inset-top)) + 20px);width:170px;height:7px;background:#2008;border:1px solid #a22;pointer-events:none}
 #barf{height:100%;width:0;background:linear-gradient(90deg,#600,#f33,#fa8)}
 #joy{position:fixed;width:120px;height:120px;margin:-60px 0 0 -60px;border-radius:50%;border:2px solid #c22a;display:none;pointer-events:none}
 #knob{position:absolute;left:40px;top:40px;width:40px;height:40px;border-radius:50%;background:#e22b}
-.b{position:fixed;width:72px;height:72px;border-radius:50%;border:2px solid #e33;background:#3008;color:#fcc;font-size:12px;display:none}
-#atk{right:20px;bottom:30px}#dsh{right:104px;bottom:18px}#pow{right:28px;bottom:116px}
+.b{position:fixed;width:84px;height:84px;touch-action:none;-webkit-appearance:none;border-radius:50%;border:2px solid #e33;background:#3008;color:#fcc;font-size:12px;display:none}
+#atk{right:calc(max(20px,env(safe-area-inset-right)) + 6px);bottom:calc(max(24px,env(safe-area-inset-bottom)) + 8px);width:104px;height:104px;font-size:15px;background:#5008}
+#dsh{right:calc(max(20px,env(safe-area-inset-right)) + 126px);bottom:calc(max(24px,env(safe-area-inset-bottom)) + 4px)}
+#pow{right:calc(max(20px,env(safe-area-inset-right)) + 40px);bottom:calc(max(24px,env(safe-area-inset-bottom)) + 124px)}
+#fs{position:fixed;right:max(10px,env(safe-area-inset-right));top:max(8px,env(safe-area-inset-top));width:40px;height:40px;border-radius:8px;border:1px solid #a22;background:#2008;color:#f88;font-size:20px;display:none}
+#rot{position:fixed;inset:0;background:#000;color:#f55;display:none;align-items:center;justify-content:center;text-align:center;font-size:22px;z-index:9;padding:20px}
+@media (orientation:portrait) and (pointer:coarse){#rot{display:flex}}
 </style></head><body>
 <canvas id="c"></canvas>
 <div id="hud">WASD / flechas: volar · J o clic: espada · Espacio: embestida · Mantén K: cargar poder</div>
 <div id="bar"><div id="barf"></div></div>
+<button id="fs">⛶</button><div id="rot">Gira el teléfono<br>(modo horizontal)</div>
 <div id="joy"><div id="knob"></div></div>
 <button class="b" id="atk">Espada</button><button class="b" id="dsh">Dash</button><button class="b" id="pow">Poder</button>
 <script>
 const cv=document.getElementById('c'),g=cv.getContext('2d'),TAU=Math.PI*2,R=Math.random;
 const WW=2000,WH=900,GY=780,K=1.4,FLOOR=GY-44*K;
 const clamp=(v,a,b)=>v<a?a:v>b?b:v;
-let W,H,DPR,S,VW,bg,vig,camX=0,shake=0,flash=0,acc=0,boltT=0;
+const TOUCH=matchMedia('(pointer:coarse)').matches||'ontouchstart' in window,MAXP=TOUCH?260:650,RATE=TOUCH?.6:1;
+let W,H,DPR,S,VW,VH,camY=0,bg,vig,camX=0,shake=0,flash=0,acc=0,boltT=0;
 
 // ---------- Sprites pre-renderizados (una sola vez) ----------
 function mk(w,h){const c=document.createElement('canvas');c.width=Math.max(1,w|0);c.height=Math.max(1,h|0);return c}
@@ -51,7 +59,7 @@ function buildBg(){
  bg=c;
  vig=mk(W*DPR,H*DPR);const v=vig.getContext('2d'),vq=v.createRadialGradient(W*DPR/2,H*DPR/2,H*DPR*.35,W*DPR/2,H*DPR/2,Math.max(W,H)*DPR*.75);
  vq.addColorStop(0,'rgba(0,0,0,0)');vq.addColorStop(1,'rgba(0,0,0,.75)');v.fillStyle=vq;v.fillRect(0,0,W*DPR,H*DPR)}
-function resize(){DPR=Math.min(1.5,devicePixelRatio||1);W=innerWidth;H=innerHeight;cv.width=W*DPR|0;cv.height=H*DPR|0;S=H/WH;VW=W/S;buildBg()}
+function resize(){DPR=Math.min(TOUCH?1:1.5,devicePixelRatio||1);W=innerWidth;H=innerHeight;cv.width=W*DPR|0;cv.height=H*DPR|0;VH=clamp(H*1.45,480,900);S=H/VH;VW=W/S;buildBg()}
 addEventListener('resize',resize);resize();
 
 // ---------- Escenario ----------
@@ -149,8 +157,9 @@ function dash(){if(P.cd>0)return;let[ix,iy]=inp();if(!ix&&!iy)ix=P.f;const m=Mat
 
 // ---------- Controles ----------
 const keys={},joy={x:0,y:0,id:null,ox:0,oy:0};let powId=null;
-const touch='ontouchstart' in window,jEl=document.getElementById('joy');
-if(touch){for(const b of document.querySelectorAll('.b'))b.style.display='block';hud.textContent='Joystick: volar · Espada · Dash · mantén Poder'}
+const touch=TOUCH,jEl=document.getElementById('joy');
+if(touch){for(const b of document.querySelectorAll('.b,#fs'))b.style.display='block';hud.textContent='Izq: volar · Espada · Dash · mantén Poder';hud.style.fontSize='11px'}
+fs.onclick=()=>{try{(document.documentElement.requestFullscreen||document.documentElement.webkitRequestFullscreen).call(document.documentElement);screen.orientation.lock('landscape').catch(()=>{})}catch(e){}};
 function inp(){let x=(keys.KeyD||keys.ArrowRight?1:0)-(keys.KeyA||keys.ArrowLeft?1:0)+joy.x,y=(keys.KeyS||keys.ArrowDown?1:0)-(keys.KeyW||keys.ArrowUp?1:0)+joy.y;
  const m=Math.hypot(x,y);return m>1?[x/m,y/m]:[x,y]}
 addEventListener('keydown',e=>{if(e.code==='Space'||e.code.startsWith('Arrow'))e.preventDefault();if(e.repeat)return;keys[e.code]=1;
@@ -178,23 +187,23 @@ function update(dt){
  if(P.y>FLOOR){P.y=FLOOR;P.vy=Math.min(0,P.vy)}if(P.y<100){P.y=100;P.vy=Math.max(0,P.vy)}
  if(Math.abs(ix)>.2)P.f=ix>0?1:-1;
  P.ph+=dt*(5+Math.hypot(P.vx,P.vy)/40+(P.dash>0?12:0)+P.charge*6);
- const pw=power();acc+=dt*(75+P.charge*170+(P.dash>0?140:0));
- while(acc>1){acc--;if(ps.length<650)spawnAura(pw)}
+ const pw=power();acc+=dt*RATE*(75+P.charge*170+(P.dash>0?140:0));
+ while(acc>1){acc--;if(ps.length<MAXP)spawnAura(pw)}
  for(let i=ps.length-1;i>=0;i--){const p=ps[i];p.l-=dt/p.d;if(p.l<=0){ps[i]=ps[ps.length-1];ps.pop();continue}
   p.x+=p.vx*dt;p.y+=p.vy*dt;if(p.k===2)p.vy+=320*dt}
  boltT-=dt;if(boltT<=0){boltT=P.charge>0?.05:.3+R()*.6;bolt()}
  for(const a of[bolts,rings,slashes])for(let i=a.length-1;i>=0;i--){a[i].t+=dt;if(a[i].t>(a[i].d||(a===bolts?.14:.25)))a.splice(i,1)}
  shake*=Math.exp(-8*dt);flash=Math.max(0,flash-dt*2.5);
  for(const a of ash){a.y-=a.v*dt*(1+P.charge);a.x+=Math.sin(P.t+a.p)*12*dt;if(a.y<0){a.y=GY;a.x=R()*WW}}
- const tx=VW>WW?(WW-VW)/2:clamp(P.x-VW/2,0,WW-VW);camX+=(tx-camX)*Math.min(1,6*dt);
+ const tx=VW>WW?(WW-VW)/2:clamp(P.x-VW/2,0,WW-VW);camX+=(tx-camX)*Math.min(1,6*dt);const ty=clamp(P.y-VH*.62,0,WH-VH);camY+=(ty-camY)*Math.min(1,6*dt);
  const bw=Math.round(P.charge*100);if(bw!==lastBar){lastBar=bw;barf.style.width=bw+'%'}}
 
 // ---------- Dibujo ----------
 function render(){
  g.setTransform(1,0,0,1,0,0);g.globalAlpha=1;g.globalCompositeOperation='source-over';
- g.drawImage(bg,-Math.max(0,camX)*S*.25*DPR,0);
+ g.fillStyle='#2a040b';g.fillRect(0,0,cv.width,cv.height);g.drawImage(bg,-Math.max(0,camX)*S*.25*DPR,(WH-VH-camY)*S*.12*DPR);
  const sx=(R()-.5)*shake,sy=(R()-.5)*shake,pw=power();
- g.setTransform(DPR*S,0,0,DPR*S,(-camX*S+sx)*DPR,sy*DPR);
+ g.setTransform(DPR*S,0,0,DPR*S,(-camX*S+sx)*DPR,(-camY*S+sy)*DPR);
  world(P.t);
  const cy=P.y-20*K,near=clamp(1-(FLOOR-P.y)/320,0,1);
  g.globalAlpha=.8;g.drawImage(SMOKE,P.x-170*pw,cy-210*pw,340*pw,400*pw);
