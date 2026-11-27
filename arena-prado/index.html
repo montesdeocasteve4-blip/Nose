@@ -60,6 +60,13 @@ canvas.placing{cursor:crosshair}
 .speedpill{display:flex;gap:4px;background:rgba(20,16,32,.85);border:2px solid #4a4068;border-radius:20px;padding:4px;flex-wrap:wrap}
 .speedpill button{font-family:var(--f-display);font-size:13px;border:0;border-radius:999px;padding:5px 9px;background:transparent;color:#d8d0f4;cursor:pointer}
 .speedpill button.on{background:var(--gold);color:#2a1d00}
+.radarbox{display:flex;gap:10px;align-items:center;color:var(--hud-ink)}
+.radarbox canvas{width:120px;height:120px;border-radius:50%;cursor:pointer;touch-action:manipulation;box-shadow:0 0 0 2px #4a4068}
+.radarinfo{display:flex;flex-direction:column;gap:2px;font-size:12px}
+.radarinfo b{font-family:var(--f-display);font-weight:400;font-size:15px}
+.radarinfo span{font-family:var(--f-mono)}
+.radarinfo small{color:#c9c1e6;max-width:110px;line-height:1.25}
+.slowtag{background:#3a2f12;border:2px solid var(--gold);color:#ffe9a8;font-family:var(--f-display);font-size:13px;padding:3px 10px;border-radius:999px}
 .round{display:flex;gap:10px;align-items:flex-end;flex:0 0 auto}
 .rbtn{border-radius:50%;display:grid;place-items:center;cursor:pointer;border:4px solid #f3d9a0;color:#fff;padding:0}
 .rbtn svg{width:44%;height:44%}
@@ -130,7 +137,7 @@ label.check{display:flex;gap:8px;align-items:center;font-size:13px}
       </div>
     </div>
   </div>
-  <div class="statusrow"><div class="teams" id="teams"></div><div class="hint" id="hint" hidden></div></div>
+  <div class="statusrow"><div class="teams" id="teams"></div><div class="hint" id="hint" hidden></div><div class="slowtag" id="slowTag" hidden></div></div>
   <div class="stage" id="stage">
     <canvas id="cv"></canvas>
     <div class="hud">
@@ -139,6 +146,10 @@ label.check{display:flex;gap:8px;align-items:center;font-size:13px}
   </div>
   <div class="bottom">
     <div class="speedpill" id="speedChips" aria-label="Velocidad de simulación"></div>
+    <div class="radarbox">
+      <canvas id="radar" width="240" height="240" aria-label="Radar: toca un avión para seguirlo con la cámara"></canvas>
+      <div class="radarinfo"><b>Radar</b><span id="radarRange">1 km</span><small>Toca un avión para seguirlo</small></div>
+    </div>
     <div class="round">
       <button class="rbtn small on" id="followBtn" title="Cámara sigue el combate" aria-label="Seguir combate"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2" fill="currentColor"/><path d="M12 1v4M12 19v4M1 12h4M19 12h4"/></svg></button>
       <button class="rbtn small" id="restartBtn" title="Reiniciar (R)" aria-label="Reiniciar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M4 12a8 8 0 1 0 2.4-5.7"/><path d="M4 3v5h5"/></svg></button>
@@ -161,6 +172,7 @@ label.check{display:flex;gap:8px;align-items:center;font-size:13px}
           <div class="speedval" id="speedVal">×1.00</div>
           <input type="range" id="speedRange" min="0.05" max="10" step="0.05" value="1" aria-label="Velocidad de simulación">
         </div>
+        <label class="check"><input type="checkbox" id="autoSlow" checked> Cámara lenta automática cuando un avión o misil está a la vista</label>
         <label class="check"><input type="checkbox" id="autoRematch"> Revancha automática al terminar</label>
         <p class="note">Escala todo: caminata, ataques, balas, retroceso y efectos.</p>
       </section>
@@ -886,6 +898,7 @@ const minPPM = () => Math.min(CW / (MAP.W + 2), (freeBottom - freeTop) / (MAP.H 
 
 function clampCam() {
   cam.ppm = clamp(cam.ppm, minPPM(), 140);
+  if (cam.jet) return;   // siguiendo un avión: la cámara puede salir del mapa
   const hw = CW / 2 / cam.ppm, hh = (freeBottom - freeTop) / 2 / cam.ppm;
   const mx = Math.max(0, MAP.W / 2 - hw + 2), my = Math.max(0, MAP.H / 2 - hh + 2);
   cam.x = MAP.W / 2 + clamp(cam.x - MAP.W / 2, -mx, mx);
@@ -893,6 +906,15 @@ function clampCam() {
 }
 
 function updateCamera(rdt) {
+  if (cam.jet && (cam.jet.gone || cam.jet.crashed || !fighters.includes(cam.jet))) cam.jet = null;
+  if (cam.jet) {
+    const j = cam.jet, tx = j.x, ty = j.y - visAlt(j), ppm = CW / 260;
+    const k = 1 - Math.exp(-8 * rdt);
+    cam.x += (tx - cam.x) * k; cam.y += (ty - cam.y) * k; cam.ppm += (ppm - cam.ppm) * k;
+    // salto directo si quedó muy lejos
+    if (Math.hypot(tx - cam.x, ty - cam.y) > 400) { cam.x = tx; cam.y = ty; }
+    clampCam(); return;
+  }
   if (!cam.follow) { clampCam(); return; }
   const set = fighters.filter(f => f.def.domain !== 'air' && (!f.ko || f.koT < 1.5));
   let x0, x1, y0, y1;
@@ -915,7 +937,25 @@ const MPX = 20;
 const mapCv = document.createElement('canvas');
 const decor = [];
 function seeded(s) { return () => (s = (s * 16807) % 2147483647) / 2147483647; }
+const grassTile = document.createElement('canvas');
+let grassPat = null;
+function buildGrassTile() {
+  const R = seeded(11), S = 8;
+  grassTile.width = S * MPX; grassTile.height = S * MPX;
+  const g = grassTile.getContext('2d');
+  g.setTransform(MPX, 0, 0, MPX, 0, 0);
+  for (let ty = 0; ty < S; ty += 2) for (let tx = 0; tx < S; tx += 2) {
+    g.fillStyle = ((tx + ty) / 2) % 2 ? '#5f9e45' : '#5a9741'; g.fillRect(tx, ty, 2, 2);
+    for (let i = 0; i < 2; i++) {
+      const x = tx + 0.3 + R() * 1.4, y = ty + 0.4 + R() * 1.3;
+      g.strokeStyle = 'rgba(30,80,20,.4)'; g.lineWidth = 0.06; g.lineCap = 'round';
+      g.beginPath(); g.moveTo(x - 0.12, y - 0.2); g.lineTo(x, y); g.lineTo(x + 0.12, y - 0.22); g.stroke();
+    }
+  }
+  grassPat = null;
+}
 function buildMap() {
+  buildGrassTile();
   const R = seeded(7), W = MAP.W, H = MAP.H, cx = W / 2, cyy = (6 + H - 4) / 2;
   mapCv.width = W * MPX; mapCv.height = H * MPX;
   const g = mapCv.getContext('2d');
@@ -1451,7 +1491,9 @@ let ghostPos = null;
 function render(rdt) {
   updateCamera(rdt);
   ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
-  ctx.fillStyle = '#1a1626'; ctx.fillRect(0, 0, CW, CH);
+  if (!grassPat) grassPat = ctx.createPattern(grassTile, 'repeat');
+  grassPat.setTransform(new DOMMatrix([cam.ppm / MPX, 0, 0, cam.ppm / MPX, sx(0), sy(0)]));
+  ctx.fillStyle = grassPat; ctx.fillRect(0, 0, CW, CH);
   if (shake > 0.1) { ctx.translate(rand(-shake, shake) * 0.5, rand(-shake, shake) * 0.5); shake *= Math.exp(-14 * rdt * Math.max(0.15, SIM.timeScale)); } else shake = 0;
   ctx.drawImage(mapCv, sx(0), sy(0), MAP.W * cam.ppm, MAP.H * cam.ppm);
   for (const c of craters) {
@@ -1507,6 +1549,7 @@ function refreshHint() {
   let txt = '';
   if (t === 'erase') txt = 'Toca un personaje para quitarlo';
   else if (t) txt = `Toca el mapa para colocar: ${SPECIES[t].name} · equipo ${TEAMS[ui.team].name}`;
+  else if (cam.jet) txt = `Siguiendo al ${cam.jet.def.name} ${cam.jet.team.name} · toca la mira o arrastra para volver`;
   else if (!placements.length) txt = 'Mapa vacío: elige un personaje arriba para colocarlo';
   hint.hidden = !txt;
   if (hint.textContent !== txt) hint.textContent = txt;
@@ -1576,7 +1619,7 @@ cv.addEventListener('pointermove', e => {
   } else if (drag) {
     const dx = e.offsetX - drag.x, dy = e.offsetY - drag.y;
     if (Math.hypot(dx, dy) > 6) drag.moved = true;
-    if (drag.moved) { cam.x = drag.cx - dx / cam.ppm; cam.y = drag.cy - dy / cam.ppm; setFollow(false); clampCam(); }
+    if (drag.moved) { cam.jet = null; cam.x = drag.cx - dx / cam.ppm; cam.y = drag.cy - dy / cam.ppm; setFollow(false); clampCam(); }
   }
 });
 cv.addEventListener('pointerup', e => {
@@ -1594,7 +1637,7 @@ cv.addEventListener('wheel', e => {
   cam.x += bx - wx(e.offsetX); cam.y += by - wy(e.offsetY);
   setFollow(false); clampCam();
 }, { passive: false });
-function setFollow(v) { cam.follow = v; document.getElementById('followBtn').classList.toggle('on', v); }
+function setFollow(v) { if (v) { cam.jet = null; clampCam(); } cam.follow = v; document.getElementById('followBtn').classList.toggle('on', v); }
 document.getElementById('followBtn').onclick = () => setFollow(!cam.follow);
 
 const PRESETS = [0.1, 0.25, 0.5, 1, 2, 5];
@@ -1666,16 +1709,97 @@ function updateTeams() {
 }
 
 let last = performance.now(), acc = 0;
+/* cámara lenta automática: si un avión, misil o bomba está a la vista, el tiempo se frena */
+const SLOW = 0.04;
+SIM.auto = 1;
+function autoSlowTarget() {
+  if (!document.getElementById('autoSlow').checked || !CW) return 1;
+  const m = 250, x0 = wx(0) - m, x1 = wx(CW) + m, y0 = wy(0) - m, y1 = wy(CH) + m;
+  const inView = (x, y) => x > x0 && x < x1 && y > y0 && y < y1;
+  const busy = bullets.some(b => b.kind === 'missile' || b.kind === 'bomb');
+  for (const f of fighters) {
+    if (f.def.domain !== 'air' || f.gone || f.crashed || !inView(f.x, f.y)) continue;
+    if (!cam.jet || f.ko || f.gun || busy) return SLOW;
+    const t = nearestEnemy(f);
+    if (t && dist3(f, t) < 1500) return SLOW;
+  }
+  for (const b of bullets) if ((b.kind === 'missile' || b.kind === 'bomb') && !b.done && inView(b.x, b.y)) return SLOW;
+  return 1;
+}
+
+/* radar: muestra aviones y misiles alrededor del mapa */
+const radar = document.getElementById('radar'), rctx = radar.getContext('2d');
+let radarRange = 1000;
+function drawRadar() {
+  const S = radar.width, c = S / 2, cx0 = MAP.W / 2, cy0r = MAP.H / 2;
+  let far = 600;
+  for (const f of fighters) if (f.def.domain === 'air' && !f.gone && !f.crashed) far = Math.max(far, Math.hypot(f.x - cx0, f.y - cy0r));
+  for (const b of bullets) if (b.kind === 'missile' && !b.done) far = Math.max(far, Math.hypot(b.x - cx0, b.y - cy0r));
+  const nice = [1000, 2000, 5000, 10000, 20000, 50000, 100000, 200000];
+  radarRange = nice.find(v => v >= far * 1.1) || nice[nice.length - 1];
+  const k = (S / 2 - 8) / radarRange, P = (x, y) => [c + (x - cx0) * k, c + (y - cy0r) * k];
+  rctx.setTransform(1, 0, 0, 1, 0, 0);
+  rctx.fillStyle = '#0e1a12'; rctx.fillRect(0, 0, S, S);
+  rctx.strokeStyle = 'rgba(120,230,140,.25)'; rctx.lineWidth = 2;
+  for (const r of [1 / 3, 2 / 3, 1]) { rctx.beginPath(); rctx.arc(c, c, (S / 2 - 8) * r, 0, 7); rctx.stroke(); }
+  rctx.beginPath(); rctx.moveTo(c, 8); rctx.lineTo(c, S - 8); rctx.moveTo(8, c); rctx.lineTo(S - 8, c); rctx.stroke();
+  const sw = (performance.now() / 1000 * 1.5) % (Math.PI * 2);
+  const g = rctx.createConicGradient ? rctx.createConicGradient(sw - 0.6, c, c) : null;
+  if (g) { g.addColorStop(0, 'rgba(120,230,140,0)'); g.addColorStop(0.1, 'rgba(120,230,140,.25)'); g.addColorStop(0.1001, 'rgba(120,230,140,0)'); rctx.fillStyle = g; rctx.beginPath(); rctx.arc(c, c, S / 2 - 8, 0, 7); rctx.fill(); }
+  // mapa y vista actual
+  const [mx0, my0] = P(0, 0), [mx1, my1] = P(MAP.W, MAP.H);
+  rctx.fillStyle = 'rgba(120,200,90,.55)'; rctx.fillRect(mx0, my0, Math.max(3, mx1 - mx0), Math.max(3, my1 - my0));
+  if (CW) { const [vx0, vy0] = P(wx(0), wy(0)), [vx1, vy1] = P(wx(CW), wy(CH)); rctx.strokeStyle = 'rgba(255,255,255,.6)'; rctx.lineWidth = 1.5; rctx.strokeRect(vx0, vy0, Math.max(3, vx1 - vx0), Math.max(3, vy1 - vy0)); }
+  for (const f of fighters) {
+    if (f.def.domain === 'air' || f.ko) continue;
+    const [x, y] = P(f.x, f.y); rctx.fillStyle = f.team.color; rctx.fillRect(x - 2, y - 2, 4, 4);
+  }
+  for (const b of bullets) {
+    if (b.done || (b.kind !== 'missile' && b.kind !== 'bomb')) continue;
+    const [x, y] = P(b.x, b.y); rctx.fillStyle = '#fff'; rctx.beginPath(); rctx.arc(x, y, 3, 0, 7); rctx.fill();
+  }
+  for (const f of fighters) {
+    if (f.def.domain !== 'air' || f.gone || f.crashed) continue;
+    const [x, y] = P(f.x, f.y);
+    rctx.save(); rctx.translate(x, y); rctx.rotate(f.heading);
+    rctx.fillStyle = f.ko ? '#888' : f.team.color; rctx.strokeStyle = '#fff'; rctx.lineWidth = 1.5;
+    rctx.beginPath(); rctx.moveTo(11, 0); rctx.lineTo(-7, -7); rctx.lineTo(-3, 0); rctx.lineTo(-7, 7); rctx.closePath(); rctx.fill(); rctx.stroke();
+    rctx.restore();
+    if (cam.jet === f) { rctx.strokeStyle = '#ffe9a8'; rctx.lineWidth = 2; rctx.beginPath(); rctx.arc(x, y, 15, 0, 7); rctx.stroke(); }
+  }
+  const txt = radarRange >= 1000 ? `${radarRange / 1000} km` : `${radarRange} m`;
+  const el = document.getElementById('radarRange'); if (el.textContent !== `radio ${txt}`) el.textContent = `radio ${txt}`;
+}
+radar.addEventListener('click', e => {
+  const r = radar.getBoundingClientRect(), S = radar.width, c = S / 2;
+  const px = (e.clientX - r.left) / r.width * S, py = (e.clientY - r.top) / r.height * S;
+  const k = (S / 2 - 8) / radarRange;
+  let best = null, bd = 30;
+  for (const f of fighters) {
+    if (f.def.domain !== 'air' || f.gone || f.crashed) continue;
+    const d = Math.hypot(c + (f.x - MAP.W / 2) * k - px, c + (f.y - MAP.H / 2) * k - py);
+    if (d < bd) { bd = d; best = f; }
+  }
+  if (best && cam.jet !== best) { cam.jet = best; cam.follow = false; document.getElementById('followBtn').classList.remove('on'); }
+  else setFollow(true);
+});
+
 function frame(now) {
   const rdt = Math.min(0.05, (now - last) / 1000); last = now;
   if (!SIM.paused) {
-    acc += rdt * SIM.timeScale;
+    const tgt = autoSlowTarget();
+    SIM.auto = tgt < SIM.auto ? tgt : SIM.auto + (tgt - SIM.auto) * (1 - Math.exp(-4 * rdt));
+    acc += rdt * SIM.timeScale * SIM.auto;
     let n = 0;
     while (acc >= FIXED && n < 800) { update(FIXED); acc -= FIXED; n++; }
     if (SIM.over && SIM.overT > 4 && document.getElementById('autoRematch').checked) resetMatch();
   }
   updateTeams();
   refreshHint();
+  drawRadar();
+  const st = document.getElementById('slowTag'), slow = SIM.auto < 0.5;
+  st.hidden = !slow;
+  if (slow) { const t = `Cámara lenta automática ×${(SIM.timeScale * SIM.auto).toFixed(2)}`; if (st.textContent !== t) st.textContent = t; }
   if (CW > 0) render(SIM.paused ? 0 : rdt);
   requestAnimationFrame(frame);
 }
