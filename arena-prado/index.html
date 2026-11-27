@@ -210,7 +210,7 @@ const SPECIES = {
     draw: drawHuman,
   },
   soldier: {
-    name: 'Soldado', height: 1.80, radius: 0.32, stride: 2.0,
+    name: 'Soldado', height: 1.80, radius: 0.32, stride: 2.0, kbScale: 0.25,   // chaleco y equipo: retrocede mucho menos
     hp: 0.0000000000015,                 // ≈ 6 276 J con chaleco antibalas: cae con 4 disparos
     speed: 6, attackSpeed: 4.5,           // caminata con equipo; 4.5 m/s al encarar el fusil
     ranged: {
@@ -652,7 +652,7 @@ function applyHit(f, o, A, pt, kind) {
   const ratio = A.damage / o.def.hp, felt = ratio >= 0.02, flinch = felt && !o.def.heavy;
   const dx = o.x - f.x, dy = o.y - f.y, d = Math.hypot(dx, dy) || 1;
   const air = o.def.domain === 'air';
-  if (flinch) { o.stun = A.stun; if (!o.def.ranged) o.attack = null; o.kbx = dx / d * A.knock; o.kby = dy / d * A.knock * 0.6; }
+  if (flinch) { o.stun = A.stun; if (!o.def.ranged) o.attack = null; const kb = o.def.kbScale ?? 1; o.kbx = dx / d * A.knock * kb; o.kby = dy / d * A.knock * 0.6 * kb; }
   if (felt) o.flash = 0.12;
   const big = (A.knock || 0) > 3;
   effects.push(felt
@@ -665,7 +665,7 @@ function applyHit(f, o, A, pt, kind) {
   if (o.hp <= 0) {
     o.ko = true; o.koT = 0; o.stun = 0; o.attack = null; o.burst = null; o.gun = null;
     if (!o.def.heavy) {
-      o.kbx = dx / d * (A.knock + 2); o.kby = dy / d * (A.knock + 2) * 0.6;
+      const kb = o.def.kbScale ?? 1; o.kbx = dx / d * (A.knock + 2) * kb; o.kby = dy / d * (A.knock + 2) * 0.6 * kb;
       effects.push({ kind: 'dust', x: o.x, y: o.y, t: -0.2, life: 0.9 });
     } else if (!air) {
       effects.push({ kind: 'boom', x: o.x, y: o.y, r: 10, t: 0, life: 1.2, sortY: o.y + 0.5 });
