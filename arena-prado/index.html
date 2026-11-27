@@ -125,6 +125,7 @@ label.check{display:flex;gap:8px;align-items:center;font-size:13px}
             <button data-team="B">Rojo</button>
           </div>
           <div class="toolrow">
+            <button class="tbtn on" id="moveBtn" title="Sin selección: arrastra para mover el mapa"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M8 1v14M1 8h14M8 1L6 3M8 1l2 2M8 15l-2-2M8 15l2-2M1 8l2-2M1 8l2 2M15 8l-2-2M15 8l-2 2"/></svg>Mover</button>
             <button class="tbtn" id="eraseBtn" title="Quitar personajes del mapa"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3l10 10M13 3L3 13"/></svg>Quitar</button>
             <button class="tbtn" id="clearBtn" title="Vaciar el mapa">Vaciar</button>
           </div>
@@ -210,7 +211,7 @@ const SPECIES = {
   /* Ares, dios griego de la guerra: hoplita de bronce con casco corintio, dory y aspis. */
   ares: {
     name: 'Ares', height: 2.10, radius: 0.36, stride: 2.5,
-    hp: 1, speed: 7, attackSpeed: 20, warCry: true,
+    hp: 1, speed: 7, chase: 12, attackSpeed: 20, warCry: true,   // chase = velocidad al perseguir (m/s)
     attacks: {
       dory: { name: 'Lanzazo', damage: 1.6, reach: 2.3, windupDist: 0.6, strikeDist: 1.6, recoverDist: 1.2, lunge: 0.4,
         knock: 8, stun: 0.3, min: 1.0, max: 2.4, weight: 0.7, anim: 'spear' },
@@ -306,7 +307,7 @@ function resetMatch() {
   SIM.time = 0; SIM.over = false; SIM.overT = 0;
   document.getElementById('banner').hidden = true;
   document.getElementById('log').innerHTML = '';
-  addLog(null, 'Comienza el combate', '');
+  if (fighters.length) addLog(null, 'Comienza el combate', '');
   for (const f of fighters) if (f.def.warCry) warCry(f);
 }
 
@@ -394,7 +395,7 @@ function update(dt) {
           if (!f.attack) {
             const keep = f.def.ai.keep;
             if (gap > keep + 0.15) {
-              const sp = Math.min(1, (gap - keep) / 0.6) * walk;
+              const sp = Math.min(1, (gap - keep) / 0.6) * (f.def.chase || walk);
               tvx = ux * sp; tvy = uy * sp;
             } else if (gap < f.def.ai.tooClose) { tvx = -ux * walk * 0.6; tvy = -uy * walk * 0.6; }
           }
@@ -1008,10 +1009,20 @@ function renderCards() {
     box.appendChild(b);
   }
 }
+function refreshHint() {
+  const hint = document.getElementById('hint'), t = ui.tool;
+  let txt = '';
+  if (t === 'erase') txt = 'Toca un personaje para quitarlo';
+  else if (t) txt = `Toca el mapa para colocar: ${SPECIES[t].name} · equipo ${TEAMS[ui.team].name}`;
+  else if (!placements.length) txt = 'Mapa vacío: elige un personaje arriba para colocarlo';
+  hint.hidden = !txt;
+  if (hint.textContent !== txt) hint.textContent = txt;
+}
 function setTool(t) {
   ui.tool = t;
   document.querySelectorAll('.card').forEach(c => c.classList.toggle('on', c.dataset.k === t));
   document.getElementById('eraseBtn').classList.toggle('on', t === 'erase');
+  document.getElementById('moveBtn').classList.toggle('on', !t);
   cv.classList.toggle('placing', !!t);
   const hint = document.getElementById('hint');
   hint.hidden = !t;
@@ -1023,6 +1034,7 @@ document.querySelectorAll('#teamSeg button').forEach(b => b.onclick = () => {
   renderCards(); setTool(ui.tool);
 });
 document.getElementById('eraseBtn').onclick = () => setTool(ui.tool === 'erase' ? null : 'erase');
+document.getElementById('moveBtn').onclick = () => setTool(null);
 document.getElementById('clearBtn').onclick = () => {
   placements = []; fighters = []; bullets = []; effects = [];
   SIM.over = false; document.getElementById('banner').hidden = true; addLog(null, 'Mapa vaciado', '');
@@ -1129,7 +1141,7 @@ function renderRoster() {
     return `<tr><td>${d.name}</td><td>${d.height.toFixed(2)} m</td>
       <td>${fmt(d.hp)} Mt<small>${fmtJ(d.hp)}</small></td>
       <td>${fmt(dmg)} Mt<small>${fmtJ(dmg)}</small></td>
-      <td>${d.speed} m/s</td><td>${d.attackSpeed} m/s</td><td>${reach}</td><td>${hits.toLocaleString('es')}</td></tr>`;
+      <td>${d.speed} m/s${d.chase ? `<small>persecución ${d.chase} m/s</small>` : ''}</td><td>${d.attackSpeed} m/s</td><td>${reach}</td><td>${hits.toLocaleString('es')}</td></tr>`;
   }).join('');
   document.getElementById('roster').innerHTML =
     `<thead><tr><th>Personaje</th><th>Altura</th><th>Vida</th><th>Daño por impacto</th><th>Caminata</th><th>Ataque</th><th>Alcance</th><th>Golpes de su igual para caer</th></tr></thead><tbody>${rows}</tbody>`;
@@ -1154,18 +1166,18 @@ function frame(now) {
     if (SIM.over && SIM.overT > 4 && document.getElementById('autoRematch').checked) resetMatch();
   }
   updateTeams();
+  refreshHint();
   if (CW > 0) render(SIM.paused ? 0 : rdt);
   requestAnimationFrame(frame);
 }
 
 buildMap();
 if (document.fonts) document.fonts.ready.then(() => { buildMap(); renderCards(); });
-[['soldier', 'A', 16, 21], ['human', 'A', 20, 16], ['human', 'A', 20, 26],
- ['human', 'B', 40, 16], ['human', 'B', 42, 21], ['human', 'B', 40, 26]].forEach(([s, t, x, y]) => addPlacement(s, t, x, y, false));
 resize();
 renderCards();
 renderRoster();
 resetMatch();
 setSpeed(1);
+setTool(null);
 requestAnimationFrame(frame);
 </script>
