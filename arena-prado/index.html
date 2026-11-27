@@ -286,7 +286,7 @@ const AREN = { W: 140, H: 90, x: 2400 / 2 - 70, y: 1600 / 2 - 45 };   // arena a
 const WALK = { x0: 12, y0: 12, x1: MAP.W - 12, y1: MAP.H - 12 };
 const SIM = { timeScale: 1, paused: false, time: 0, over: false, overT: 0 };
 const FIXED = 1 / 240;
-const VIS_ALT = 8;   // altura visual (m) a la que se dibujan los aviones sobre su sombra
+const VIS_ALT = 16;   // altura visual (m) a la que se dibujan los aviones sobre su sombra
 let craters = [];
 for (const d of Object.values(SPECIES)) d.domain = d.domain || 'ground';
 const active = o => !o.ko && !o.retired;
@@ -635,7 +635,7 @@ function tryMelee(f, a) {
   const A = a.A;
   let best = null, bd = 1e9;
   for (const o of fighters) {
-    if (o === f || o.ko || o.team === f.team) continue;
+    if (o === f || o.ko || o.team === f.team || o.def.domain === 'air') continue;
     const dx = o.x - f.x, dy = o.y - f.y, d = Math.hypot(dx, dy * 1.3);
     if (d - o.def.radius <= A.reach && dx * f.face > -0.25 && d < bd) { bd = d; best = o; }
   }
@@ -929,7 +929,9 @@ function airThrow(f, dt) {
     if (active(a.target)) {
       const c = aimPt(a.target);
       f.face = c.x >= f.x ? 1 : -1;
-      f.aim = clamp(Math.atan2(c.y - (f.y - f.def.height * 0.5), Math.abs(c.x - f.x) + 0.01), -1.2, 0.3);
+      // elevación real (altitud del avión sobre distancia horizontal): apunta la lanza hacia arriba hasta casi vertical
+      const elev = Math.atan2((a.target.alt || 0) - f.def.height * 0.5, Math.hypot(a.target.x - f.x, a.target.y - f.y) + 0.01);
+      f.aim = -clamp(elev, 0, 1.45);
     }
     if (!a.hitDone && a.t >= a.windup + a.strike) { a.hitDone = true; throwSpear(f, a); }
     if (a.t >= a.windup + a.strike + a.recover) { f.attack = null; f.throwCd = rand(...A.cooldown); }
@@ -1356,6 +1358,8 @@ function drawAres(c, f) {
   const spearOn = a && a.A && a.A.anim === 'spear', shieldOn = a && a.A && a.A.anim === 'shield';
   const se = spearOn ? ext : 0;
   const hx = 0.05 + Math.max(0, se) * 0.3 + Math.min(0, se) * 0.3;
+  const spearGone = a && a.thrown && a.hitDone;   // ya la arrojó
+  if (!spearGone) {
   c.save(); c.translate(hx, -0.47); c.rotate(spearOn ? f.aim * (a.thrown ? 1 : 0.6) : -0.25);
   limbLine(c, -0.55, 0, 0.7, 0, 0.03, '#7a5230');
   c.beginPath(); c.moveTo(0.92, 0); c.quadraticCurveTo(0.8, -0.06, 0.68, 0); c.quadraticCurveTo(0.8, 0.06, 0.92, 0);
@@ -1363,6 +1367,7 @@ function drawAres(c, f) {
   rr(c, -0.6, -0.02, 0.08, 0.04, 0.01, BRZ_D);
   if (spearOn && ext > 0.5) { c.strokeStyle = `rgba(255,210,130,${(ext - 0.5) * 1.6})`; c.lineWidth = 0.05; c.beginPath(); c.moveTo(0.2, 0); c.lineTo(0.66, 0); c.stroke(); }
   c.restore();
+  }
   limbLine(c, -0.05, -0.58, hx, -0.47, 0.085, shade(skin, 0.85));
   circ(c, hx, -0.47, 0.05, shade(skin, 0.85), lw);
   legs(c, f, skin, '#6b4423');
