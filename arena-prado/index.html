@@ -29,12 +29,12 @@ h1{font-family:var(--f-display);font-weight:400;font-size:clamp(28px,4vw,38px);m
 .kbd{font-family:var(--f-mono);font-size:12px;color:var(--muted)}
 .kbd b{display:inline-block;border:1px solid var(--line);background:var(--panel);border-radius:4px;padding:1px 6px;color:var(--fg);font-weight:500}
 
-.stage{position:relative;border-radius:18px;overflow:hidden;background:#1a1626;height:min(80vh,760px);min-height:520px;max-width:100%;box-shadow:0 14px 40px -22px rgba(10,6,30,.7)}
+.stage{position:relative;border-radius:18px;overflow:hidden;background:#1a1626;height:min(70vh,680px);min-height:420px;max-width:100%;box-shadow:0 14px 40px -22px rgba(10,6,30,.7)}
 canvas{display:block;width:100%;height:100%;touch-action:none;cursor:grab}
 canvas.placing{cursor:crosshair}
 .hud{position:absolute;inset:0;pointer-events:none}
 .hud > *{pointer-events:auto}
-.toppanel{position:absolute;top:10px;left:10px;right:10px;background:linear-gradient(180deg,var(--hud-2),var(--hud));border:2px solid var(--gold);border-radius:16px;padding:8px 10px;display:flex;gap:10px;align-items:center;color:var(--hud-ink);box-shadow:0 6px 0 rgba(0,0,0,.25)}
+.toppanel{background:linear-gradient(180deg,var(--hud-2),var(--hud));border:2px solid var(--gold);border-radius:16px;padding:8px 10px;display:flex;gap:10px;align-items:center;color:var(--hud-ink);box-shadow:0 6px 0 rgba(0,0,0,.25)}
 .cards{display:flex;gap:8px;overflow-x:auto;flex:1;min-width:0;padding-bottom:2px;scrollbar-width:thin}
 .card{flex:0 0 auto;display:flex;flex-direction:column;align-items:center;gap:2px;width:74px;padding:5px 4px 6px;border-radius:12px;border:2px solid #4a4068;background:#231d36;color:var(--hud-ink);cursor:pointer;font:inherit}
 .card canvas{width:52px;height:52px;cursor:inherit;pointer-events:none}
@@ -51,10 +51,11 @@ canvas.placing{cursor:crosshair}
 .tbtn{font-family:var(--f-display);font-size:13px;border-radius:10px;border:2px solid #4a4068;background:#231d36;color:var(--hud-ink);padding:5px 10px;cursor:pointer;display:flex;gap:6px;align-items:center;justify-content:center}
 .tbtn.on{border-color:var(--gold);background:#3a2f12}
 .tbtn svg{width:14px;height:14px}
-.hint{position:absolute;left:50%;transform:translateX(-50%);background:rgba(20,16,32,.82);color:#ffe9a8;font-family:var(--f-display);font-size:13px;padding:4px 12px;border-radius:999px;white-space:nowrap;pointer-events:none;max-width:calc(100% - 20px);overflow:hidden;text-overflow:ellipsis}
-.teams{position:absolute;left:12px;display:flex;gap:6px;font-family:var(--f-display);font-size:14px;pointer-events:none}
+.hint{background:rgba(20,16,32,.82);color:#ffe9a8;font-family:var(--f-display);font-size:13px;padding:4px 12px;border-radius:999px;white-space:nowrap;pointer-events:none;max-width:calc(100% - 20px);overflow:hidden;text-overflow:ellipsis}
+.statusrow{display:flex;align-items:center;gap:10px;flex-wrap:wrap;min-height:30px}
+.teams{display:flex;gap:6px;font-family:var(--f-display);font-size:14px;pointer-events:none}
 .teams span{background:rgba(20,16,32,.8);color:#fff;border-radius:999px;padding:3px 10px;border:2px solid var(--c)}
-.bottom{position:absolute;left:12px;right:12px;bottom:12px;display:flex;align-items:flex-end;justify-content:space-between;gap:10px;pointer-events:none}
+.bottom{background:linear-gradient(180deg,var(--hud-2),var(--hud));border:2px solid var(--gold);border-radius:16px;padding:8px 10px;display:flex;align-items:flex-end;justify-content:space-between;gap:10px;pointer-events:none}
 .bottom > *{pointer-events:auto}
 .speedpill{display:flex;gap:4px;background:rgba(20,16,32,.85);border:2px solid #4a4068;border-radius:20px;padding:4px;flex-wrap:wrap}
 .speedpill button{font-family:var(--f-display);font-size:13px;border:0;border-radius:999px;padding:5px 9px;background:transparent;color:#d8d0f4;cursor:pointer}
@@ -70,7 +71,7 @@ canvas.placing{cursor:crosshair}
 .banner .small{font-weight:700;font-size:clamp(13px,2vw,18px);margin-top:8px;text-shadow:0 2px 4px rgba(0,0,0,.7)}
 button:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 @media (max-width:640px){
-  .stage{height:80vh;min-height:520px;border-radius:14px}
+  .stage{height:62vh;min-height:380px;border-radius:14px}
   .toppanel{flex-direction:column;align-items:stretch;gap:6px;padding:6px}
   .tools{flex-direction:row;flex-wrap:wrap}
   .seg{flex:1}
@@ -114,34 +115,34 @@ label.check{display:flex;gap:8px;align-items:center;font-size:13px}
     <div class="kbd"><b>Espacio</b> pausa · <b>R</b> reiniciar · <b>1–5</b> velocidad · rueda o pellizco: zoom</div>
   </header>
 
+  <!-- panel de personajes, fuera del mapa -->
+  <div class="toppanel" id="toppanel">
+    <div class="cards" id="cards"></div>
+    <div class="tools">
+      <div class="seg" id="teamSeg">
+        <button data-team="A" class="on">Azul</button>
+        <button data-team="B">Rojo</button>
+      </div>
+      <div class="toolrow">
+        <button class="tbtn on" id="moveBtn" title="Sin selección: arrastra para mover el mapa"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M8 1v14M1 8h14M8 1L6 3M8 1l2 2M8 15l-2-2M8 15l2-2M1 8l2-2M1 8l2 2M15 8l-2-2M15 8l-2 2"/></svg>Mover</button>
+        <button class="tbtn" id="eraseBtn" title="Quitar personajes del mapa"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3l10 10M13 3L3 13"/></svg>Quitar</button>
+        <button class="tbtn" id="clearBtn" title="Vaciar el mapa">Vaciar</button>
+      </div>
+    </div>
+  </div>
+  <div class="statusrow"><div class="teams" id="teams"></div><div class="hint" id="hint" hidden></div></div>
   <div class="stage" id="stage">
     <canvas id="cv"></canvas>
     <div class="hud">
-      <div class="toppanel" id="toppanel">
-        <div class="cards" id="cards"></div>
-        <div class="tools">
-          <div class="seg" id="teamSeg">
-            <button data-team="A" class="on">Azul</button>
-            <button data-team="B">Rojo</button>
-          </div>
-          <div class="toolrow">
-            <button class="tbtn on" id="moveBtn" title="Sin selección: arrastra para mover el mapa"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M8 1v14M1 8h14M8 1L6 3M8 1l2 2M8 15l-2-2M8 15l2-2M1 8l2-2M1 8l2 2M15 8l-2-2M15 8l-2 2"/></svg>Mover</button>
-            <button class="tbtn" id="eraseBtn" title="Quitar personajes del mapa"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3l10 10M13 3L3 13"/></svg>Quitar</button>
-            <button class="tbtn" id="clearBtn" title="Vaciar el mapa">Vaciar</button>
-          </div>
-        </div>
-      </div>
-      <div class="hint" id="hint" hidden></div>
-      <div class="teams" id="teams"></div>
       <div class="banner" id="banner" hidden><div class="big" id="bannerBig"></div><div class="small" id="bannerSmall"></div></div>
-      <div class="bottom">
-        <div class="speedpill" id="speedChips" aria-label="Velocidad de simulación"></div>
-        <div class="round">
-          <button class="rbtn small on" id="followBtn" title="Cámara sigue el combate" aria-label="Seguir combate"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2" fill="currentColor"/><path d="M12 1v4M12 19v4M1 12h4M19 12h4"/></svg></button>
-          <button class="rbtn small" id="restartBtn" title="Reiniciar (R)" aria-label="Reiniciar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M4 12a8 8 0 1 0 2.4-5.7"/><path d="M4 3v5h5"/></svg></button>
-          <button class="rbtn big" id="pauseBtn" title="Pausa (Espacio)" aria-label="Pausar"><svg id="pauseIcon" viewBox="0 0 24 24" fill="currentColor"><rect x="5" y="4" width="5" height="16" rx="1.5"/><rect x="14" y="4" width="5" height="16" rx="1.5"/></svg></button>
-        </div>
-      </div>
+    </div>
+  </div>
+  <div class="bottom">
+    <div class="speedpill" id="speedChips" aria-label="Velocidad de simulación"></div>
+    <div class="round">
+      <button class="rbtn small on" id="followBtn" title="Cámara sigue el combate" aria-label="Seguir combate"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2" fill="currentColor"/><path d="M12 1v4M12 19v4M1 12h4M19 12h4"/></svg></button>
+      <button class="rbtn small" id="restartBtn" title="Reiniciar (R)" aria-label="Reiniciar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M4 12a8 8 0 1 0 2.4-5.7"/><path d="M4 3v5h5"/></svg></button>
+      <button class="rbtn big" id="pauseBtn" title="Pausa (Espacio)" aria-label="Pausar"><svg id="pauseIcon" viewBox="0 0 24 24" fill="currentColor"><rect x="5" y="4" width="5" height="16" rx="1.5"/><rect x="14" y="4" width="5" height="16" rx="1.5"/></svg></button>
     </div>
   </div>
 
@@ -569,12 +570,8 @@ function resize() {
   DPR = Math.min(2, window.devicePixelRatio || 1);
   CW = r.width; CH = r.height;
   cv.width = Math.round(CW * DPR); cv.height = Math.round(CH * DPR);
-  const tp = document.getElementById('toppanel');
-  freeTop = tp.offsetTop + tp.offsetHeight + 8;
-  const bottom = document.querySelector('.bottom');
-  freeBottom = CH - bottom.offsetHeight - 16;
-  document.getElementById('hint').style.top = freeTop + 'px';
-  document.getElementById('teams').style.top = (freeTop + 30) + 'px';
+  freeTop = 8;
+  freeBottom = CH - 8;
 }
 new ResizeObserver(resize).observe(document.getElementById('stage'));
 
