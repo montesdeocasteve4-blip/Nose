@@ -261,7 +261,7 @@ const SPECIES = {
   f22: {
     name: 'F-22', domain: 'air', heavy: true, height: 5.08, length: 18.9, span: 13.6, radius: 7, stride: 1,
     hp: 0.00005, speed: 670, attackSpeed: 670,
-    altitude: 300, gLimit: 9,
+    altitude: 300, gLimit: 9, cornerSpeed: 200, runSpeed: 280, maxTurn: 0.49, accel: 15, decel: 35, rearm: 60,
     weapons: {
       aim120: { name: 'AIM-120 AMRAAM', damage: 0.00000008, ammo: 2, range: 160000, minRange: 400, speed: 1370, pk: 0.6, cooldown: 3, targets: ['air'] },
       aim9: { name: 'AIM-9X Sidewinder', damage: 0.00000008, ammo: 2, range: 35000, minRange: 300, cone: 0.6, speed: 900, pk: 0.8, cooldown: 2, targets: ['air'] },
@@ -277,8 +277,9 @@ const TEAMS = {
   B: { key: 'B', name: 'Rojo', color: '#ef4444' },
 };
 
-const MAP = { W: 140, H: 90 };
-const WALK = { x0: 4.6, y0: 7.2, x1: MAP.W - 4.6, y1: MAP.H - 4.6 };
+const MAP = { W: 2400, H: 1600 };                                     // campo completo (m)
+const AREN = { W: 140, H: 90, x: 2400 / 2 - 70, y: 1600 / 2 - 45 };   // arena amurallada en el centro
+const WALK = { x0: 12, y0: 12, x1: MAP.W - 12, y1: MAP.H - 12 };
 const SIM = { timeScale: 1, paused: false, time: 0, over: false, overT: 0 };
 const FIXED = 1 / 240;
 const VIS_ALT = 8;   // altura visual (m) a la que se dibujan los aviones sobre su sombra
@@ -339,7 +340,7 @@ function makeFighter(p) {
     heading: dirA, turretA: dirA, spd: 0, alt: def.altitude || 0, bank: 0,
     ammoW: Object.fromEntries(Object.entries(def.weapons || {}).map(([k, w]) => [k, w.ammo])),
     cd: Object.fromEntries(Object.keys(def.weapons || {}).map(k => [k, rand(0.8, 2)])),
-    retired: false, gone: false, crashed: false, trail: [], aimMain: 0, mgAim: -0.4, mgFace: 0, burst: null, gun: null,
+    retired: false, gone: false, crashed: false, trail: [], v: def.domain === 'air' ? def.speed * 0.6 : 0, away: false, rearming: false, rearmT: 0, aimMain: 0, mgAim: -0.4, mgFace: 0, burst: null, gun: null,
   };
 }
 
@@ -490,7 +491,7 @@ function update(dt) {
   for (const f of fighters) if (f.ghosts.length) f.ghosts = f.ghosts.filter(g => SIM.time - g.t < 0.14);
 
   const present = new Set(fighters.map(f => f.team.key));
-  const alive = new Set(fighters.filter(active).map(f => f.team.key));
+  const alive = new Set(fighters.filter(f => active(f) || f.rearming).map(f => f.team.key));
   if (!SIM.over && present.size >= 2 && alive.size <= 1) endMatch([...alive][0]);
   if (SIM.over) SIM.overT += dt;
 }
@@ -758,7 +759,7 @@ function updateAir(f, dt) {
   if (f.ko) {
     f.koT += dt;
     f.alt = Math.max(0, f.alt - (40 + f.koT * 120) * dt);
-    const v = D.speed * Math.max(0.3, 1 - f.koT * 0.2);
+    const v = f.v * Math.max(0.3, 1 - f.koT * 0.2);
     f.x += Math.cos(f.heading) * v * dt; f.y += Math.sin(f.heading) * v * dt; f.heading += 0.4 * dt;
     if ((f.smokeT = (f.smokeT || 0) - dt) <= 0) {
       f.smokeT = 0.02;
@@ -772,19 +773,38 @@ function updateAir(f, dt) {
     }
     return;
   }
-  if (!f.retired) thinkJet(f, dt);
-  else { flyJet(f, f.heading, dt); if (Math.hypot(f.x - MAP.W / 2, f.y - MAP.H / 2) > 6000) f.gone = true; }
+  if (f.rearming) {
+    if (f.away) {
+      f.rearmT -= dt;
+      if (f.rearmT <= 0) {
+        // vuelve desde un borde con la carga completa
+        const side = Math.random() * 4 | 0;
+        f.x = side === 0 ? -300 : side === 1 ? MAP.W + 300 : rand(200, MAP.W - 200);
+        f.y = side === 2 ? -300 : side === 3 ? MAP.H + 300 : rand(200, MAP.H - 200);
+        f.heading = Math.atan2(MAP.H / 2 - f.y, MAP.W / 2 - f.x); f.v = D.speed;
+        for (const k in D.weapons) f.ammoW[k] = D.weapons[k].ammo;
+        f.rearming = false; f.retired = false; f.away = false; f.trail = [];
+        addLog(f, `${D.name} regresa rearmado`, '');
+      }
+      return;
+    }
+    flyJet(f, Math.atan2(f.y - MAP.H / 2, f.x - MAP.W / 2), dt, D.speed);
+    if (f.x < -400 || f.x > MAP.W + 400 || f.y < -400 || f.y > MAP.H + 400) { f.away = true; f.rearmT = D.rearm; }
+  } else thinkJet(f, dt);
   f.trail.push({ x: f.x, y: f.y, h: f.heading });
   if (f.trail.length > 60) f.trail.shift();
 }
 
 /* gira como máximo a gLimit (ω = g·n / v) y vuela siempre a su velocidad */
-function flyJet(f, desired, dt) {
-  const D = f.def, omega = D.gLimit * 9.81 / D.speed;
-  const e = angDiff(desired, f.heading);
+/* frena a velocidad de esquina para girar cerrado (máx. 9 g) y acelera en recta hasta `cruise` */
+function flyJet(f, desired, dt, cruise) {
+  const D = f.def, e = angDiff(desired, f.heading);
+  const want = Math.abs(e) > 0.35 ? D.cornerSpeed : (cruise || D.speed);
+  f.v += clamp(want - f.v, -D.decel * dt, D.accel * dt);
+  const omega = Math.min(D.gLimit * 9.81 / f.v, D.maxTurn);
   f.heading += clamp(e, -omega * dt, omega * dt);
   f.bank += (clamp(e * 3, -1, 1) - f.bank) * (1 - Math.exp(-3 * dt));
-  f.vx = Math.cos(f.heading) * D.speed; f.vy = Math.sin(f.heading) * D.speed;
+  f.vx = Math.cos(f.heading) * f.v; f.vy = Math.sin(f.heading) * f.v;
   f.x += f.vx * dt; f.y += f.vy * dt;
   f.face = f.vx >= 0 ? 1 : -1;
   return Math.abs(e);
@@ -795,26 +815,33 @@ function thinkJet(f, dt) {
   for (const k in f.cd) f.cd[k] -= dt;
   if (f.gun) gunStep(f, dt);
   const t = nearestEnemy(f);
-  if (!t) {
-    const enemies = fighters.some(o => active(o) && o.team !== f.team);
-    if (enemies || !Object.values(f.ammoW).some(a => a > 0)) {
-      f.retired = true; f.gun = null;
-      addLog(f, `${D.name} sin armamento útil: regresa a la base`, '');
-      return;
-    }
-    flyJet(f, Math.atan2(MAP.H / 2 - f.y, MAP.W / 2 - f.x), dt);   // patrulla sobre el mapa
+  const enemies = fighters.some(o => active(o) && o.team !== f.team);
+  if (!t && (enemies || !Object.values(f.ammoW).some(a => a > 0))) {
+    f.retired = true; f.rearming = true; f.gun = null;
+    addLog(f, `${D.name} sin munición útil: vuelve a la base a rearmarse (${D.rearm} s)`, '');
     return;
   }
-  const err = flyJet(f, Math.atan2(t.y - f.y, t.x - f.x), dt);
-  const d2 = Math.hypot(t.x - f.x, t.y - f.y), d3 = dist3(f, t);
+  let desired = t ? Math.atan2(t.y - f.y, t.x - f.x) : Math.atan2(MAP.H / 2 - f.y, MAP.W / 2 - f.x);
+  // mantenerse sobre el mapa: si se acerca al borde mirando hacia afuera, vuelve hacia el centro
+  const m = 350, out = f.x < m || f.x > MAP.W - m || f.y < m || f.y > MAP.H - m;
+  const toC = Math.atan2(MAP.H / 2 - f.y, MAP.W / 2 - f.x);
+  if (out && Math.abs(angDiff(toC, f.heading)) > Math.PI / 2) desired = toC;
+  const cruise = !t ? D.runSpeed : t.def.domain === 'air' ? D.speed : D.runSpeed;
+  const err = flyJet(f, desired, dt, cruise);
+  if (!t) return;
+  const d2 = Math.hypot(t.x - f.x, t.y - f.y), d3 = dist3(f, t), aimErr = Math.abs(angDiff(Math.atan2(t.y - f.y, t.x - f.x), f.heading));
   const startGun = () => { f.gun = { target: t, left: Math.min(W.gun.burst, f.ammoW.gun), t: 0 }; };
   if (t.def.domain === 'air') {
     if (f.ammoW.aim120 > 0 && f.cd.aim120 <= 0 && d3 > W.aim120.minRange && d3 < W.aim120.range) launchMissile(f, t, 'aim120');
-    else if (f.ammoW.aim9 > 0 && f.cd.aim9 <= 0 && d3 > W.aim9.minRange && d3 < W.aim9.range && err < W.aim9.cone) launchMissile(f, t, 'aim9');
-    if (!f.gun && f.ammoW.gun > 0 && d3 < W.gun.range && err < W.gun.cone) startGun();
-  } else if (f.ammoW.jdam > 0) {
-    if (f.cd.jdam <= 0 && d2 < W.jdam.range && err < 0.3) dropBomb(f, t);
-  } else if (!f.gun && f.ammoW.gun > 0 && d3 < W.gun.range && err < W.gun.cone) startGun();
+    else if (f.ammoW.aim9 > 0 && f.cd.aim9 <= 0 && d3 > W.aim9.minRange && d3 < W.aim9.range && aimErr < W.aim9.cone) launchMissile(f, t, 'aim9');
+    if (!f.gun && f.ammoW.gun > 0 && d3 < W.gun.range && aimErr < W.gun.cone) startGun();
+    return;
+  }
+  // tierra: JDAM contra blindados o grupos; cañón contra objetivos sueltos
+  const group = fighters.filter(o => active(o) && o.team !== f.team && o.def.domain === 'ground' && Math.hypot(o.x - t.x, o.y - t.y) < 25).length;
+  const useBomb = f.ammoW.jdam > 0 && (t.def.heavy || group >= 2 || f.ammoW.gun <= 0);
+  if (useBomb) { if (f.cd.jdam <= 0 && d2 < W.jdam.range && aimErr < 0.3) dropBomb(f, t); }
+  else if (!f.gun && f.ammoW.gun > 0 && d3 < W.gun.range && aimErr < W.gun.cone) startGun();
 }
 
 function gunStep(f, dt) {
@@ -906,7 +933,7 @@ function clampCam() {
 }
 
 function updateCamera(rdt) {
-  if (cam.jet && (cam.jet.gone || cam.jet.crashed || !fighters.includes(cam.jet))) cam.jet = null;
+  if (cam.jet && (cam.jet.gone || cam.jet.away || cam.jet.crashed || !fighters.includes(cam.jet))) cam.jet = null;
   if (cam.jet) {
     const j = cam.jet, tx = j.x, ty = j.y - visAlt(j), ppm = CW / 260;
     const k = 1 - Math.exp(-8 * rdt);
@@ -918,7 +945,7 @@ function updateCamera(rdt) {
   if (!cam.follow) { clampCam(); return; }
   const set = fighters.filter(f => f.def.domain !== 'air' && (!f.ko || f.koT < 1.5));
   let x0, x1, y0, y1;
-  if (!set.length) { x0 = WALK.x0; x1 = WALK.x1; y0 = WALK.y0; y1 = WALK.y1; }
+  if (!set.length) { x0 = AREN.x; x1 = AREN.x + AREN.W; y0 = AREN.y; y1 = AREN.y + AREN.H; }
   else {
     x0 = Math.min(...set.map(f => f.x)) - 5; x1 = Math.max(...set.map(f => f.x)) + 5;
     y0 = Math.min(...set.map(f => f.y - f.def.height)) - 4; y1 = Math.max(...set.map(f => f.y)) + 3;
@@ -956,7 +983,7 @@ function buildGrassTile() {
 }
 function buildMap() {
   buildGrassTile();
-  const R = seeded(7), W = MAP.W, H = MAP.H, cx = W / 2, cyy = (6 + H - 4) / 2;
+  const R = seeded(7), W = AREN.W, H = AREN.H, cx = W / 2, cyy = (6 + H - 4) / 2;
   mapCv.width = W * MPX; mapCv.height = H * MPX;
   const g = mapCv.getContext('2d');
   g.setTransform(MPX, 0, 0, MPX, 0, 0);
@@ -1029,6 +1056,82 @@ function buildMap() {
   }
   for (let i = 0; i < 14; i++) decor.push({ k: 'rock', x: R() < .5 ? 3.2 + R() * 0.6 : W - 3.6 + R() * 0.6, y: 9 + R() * (H - 14), s: 0.6 + R() * 0.5 });
   decor.push({ k: 'torch', x: cx - 4.6, y: 6.2 }, { k: 'torch', x: cx + 4.6, y: 6.2 });
+  for (const d of decor) { d.x += AREN.x; d.y += AREN.y; }
+  buildField();
+}
+
+/* campo abierto alrededor de la arena: caminos, lagos, cultivos, bosques y rocas */
+const field = { roads: [], lakes: [], crops: [] };
+function buildField() {
+  const R = seeded(23), W = MAP.W, H = MAP.H, cx = W / 2, cy = H / 2;
+  const nearArena = (x, y, m) => x > AREN.x - m && x < AREN.x + AREN.W + m && y > AREN.y - m && y < AREN.y + AREN.H + m;
+  field.roads = [
+    { x0: 0, y0: cy, x1: W, y1: cy, w: 7 }, { x0: cx, y0: 0, x1: cx, y1: H, w: 7 },
+    { x0: 160, y0: 140, x1: W - 260, y1: H - 110, w: 5 }, { x0: W - 200, y0: 120, x1: cx + 300, y1: cy - 40, w: 4 },
+  ];
+  const onRoad = (x, y, m) => field.roads.some(r => {
+    const dx = r.x1 - r.x0, dy = r.y1 - r.y0, L = Math.hypot(dx, dy);
+    const t = clamp(((x - r.x0) * dx + (y - r.y0) * dy) / (L * L), 0, 1);
+    return Math.hypot(x - (r.x0 + dx * t), y - (r.y0 + dy * t)) < r.w / 2 + m;
+  });
+  field.lakes = [];
+  while (field.lakes.length < 5) {
+    const rx = 40 + R() * 110, x = 150 + R() * (W - 300), y = 150 + R() * (H - 300);
+    if (Math.hypot(x - cx, y - cy) < 320 || onRoad(x, y, rx + 10)) continue;
+    field.lakes.push({ x, y, rx, ry: rx * (0.5 + R() * 0.3) });
+  }
+  const inLake = (x, y, m) => field.lakes.some(l => ((x - l.x) / (l.rx + m)) ** 2 + ((y - l.y) / (l.ry + m)) ** 2 < 1);
+  field.crops = [];
+  const cols = ['#c9b458', '#8fb34a', '#a7c45a', '#b89a52', '#9ab650'];
+  for (let i = 0, tries = 0; i < 12 && tries < 400; tries++) {
+    const w = 80 + R() * 160, h = 60 + R() * 110, x = 60 + R() * (W - w - 120), y = 60 + R() * (H - h - 120);
+    const corners = [[x, y], [x + w, y], [x, y + h], [x + w, y + h], [x + w / 2, y + h / 2]];
+    if (corners.some(([a, b]) => nearArena(a, b, 60) || inLake(a, b, 15) || onRoad(a, b, 6))) continue;
+    if (field.crops.some(c => x < c.x + c.w + 10 && x + w + 10 > c.x && y < c.y + c.h + 10 && y + h + 10 > c.y)) continue;
+    field.crops.push({ x, y, w, h, col: cols[i % cols.length], rows: R() < .5 }); i++;
+  }
+  const inCrop = (x, y) => field.crops.some(c => x > c.x - 3 && x < c.x + c.w + 3 && y > c.y - 3 && y < c.y + c.h + 3);
+  const free = (x, y) => x > 20 && x < W - 20 && y > 20 && y < H - 20 && !nearArena(x, y, 25) && !inLake(x, y, 4) && !onRoad(x, y, 3) && !inCrop(x, y);
+  for (let c = 0; c < 34; c++) {
+    const fx = 80 + R() * (W - 160), fy = 80 + R() * (H - 160), rad = 15 + R() * 50, n = 12 + (R() * 40 | 0);
+    for (let i = 0; i < n; i++) {
+      const a = R() * Math.PI * 2, d = Math.sqrt(R()) * rad, x = fx + Math.cos(a) * d, y = fy + Math.sin(a) * d * 0.8;
+      if (free(x, y)) decor.push({ k: 'tree', x, y, s: 0.8 + R() * 0.6 });
+    }
+  }
+  for (let i = 0; i < 160; i++) { const x = 30 + R() * (W - 60), y = 30 + R() * (H - 60); if (free(x, y)) decor.push({ k: R() < .7 ? 'rock' : 'tree', x, y, s: 0.5 + R() * 0.7 }); }
+}
+
+function drawField() {
+  const p = cam.ppm, vx0 = wx(0), vx1 = wx(CW), vy0 = wy(0), vy1 = wy(CH);
+  for (const c of field.crops) {
+    if (c.x > vx1 || c.x + c.w < vx0 || c.y > vy1 || c.y + c.h < vy0) continue;
+    ctx.fillStyle = c.col; ctx.fillRect(sx(c.x), sy(c.y), c.w * p, c.h * p);
+    if (p > 1.2) {
+      ctx.strokeStyle = 'rgba(60,50,20,.25)'; ctx.lineWidth = Math.max(1, p * 0.25);
+      const a = Math.max(c.y, vy0), b = Math.min(c.y + c.h, vy1);
+      ctx.beginPath();
+      for (let y = c.y + 0.8 + Math.max(0, Math.floor((a - c.y) / 1.6)) * 1.6; y < b; y += 1.6) { ctx.moveTo(sx(c.x), sy(y)); ctx.lineTo(sx(c.x + c.w), sy(y)); }
+      ctx.stroke();
+    }
+    ctx.strokeStyle = 'rgba(80,60,30,.5)'; ctx.lineWidth = Math.max(1, p * 0.4); ctx.strokeRect(sx(c.x), sy(c.y), c.w * p, c.h * p);
+  }
+  ctx.lineCap = 'butt';
+  for (const r of field.roads) {
+    ctx.strokeStyle = '#9c7a48'; ctx.lineWidth = Math.max(2, (r.w + 1) * p);
+    ctx.beginPath(); ctx.moveTo(sx(r.x0), sy(r.y0)); ctx.lineTo(sx(r.x1), sy(r.y1)); ctx.stroke();
+    ctx.strokeStyle = '#b8935a'; ctx.lineWidth = Math.max(1.5, r.w * p);
+    ctx.beginPath(); ctx.moveTo(sx(r.x0), sy(r.y0)); ctx.lineTo(sx(r.x1), sy(r.y1)); ctx.stroke();
+  }
+  for (const l of field.lakes) {
+    if (l.x - l.rx > vx1 || l.x + l.rx < vx0 || l.y - l.ry > vy1 || l.y + l.ry < vy0) continue;
+    ctx.fillStyle = '#c9b27a'; ctx.beginPath(); ctx.ellipse(sx(l.x), sy(l.y), (l.rx + 3) * p, (l.ry + 3) * p, 0, 0, 7); ctx.fill();
+    ctx.fillStyle = '#3f93b8'; ctx.beginPath(); ctx.ellipse(sx(l.x), sy(l.y), l.rx * p, l.ry * p, 0, 0, 7); ctx.fill();
+    ctx.fillStyle = '#2f7ea3'; ctx.beginPath(); ctx.ellipse(sx(l.x), sy(l.y + l.ry * 0.1), l.rx * 0.7 * p, l.ry * 0.6 * p, 0, 0, 7); ctx.fill();
+  }
+  ctx.strokeStyle = '#6b4a2b'; ctx.lineWidth = Math.max(1.5, p * 0.35); ctx.setLineDash([Math.max(4, p * 3), Math.max(3, p * 2)]);
+  ctx.strokeRect(sx(WALK.x0 - 2), sy(WALK.y0 - 2), (WALK.x1 - WALK.x0 + 4) * p, (WALK.y1 - WALK.y0 + 4) * p);
+  ctx.setLineDash([]);
 }
 
 function drawDecor(d) {
@@ -1326,7 +1429,7 @@ function drawJetShape(c, f, shadow) {
 function jetPortrait(g, d) { g.translate(52, 52); g.rotate(-Math.PI / 2); g.scale(4.7, 4.7); drawJetShape(g, d, false); }
 
 function drawAir(f) {
-  if (f.gone || f.crashed) return;
+  if (f.gone || f.crashed || f.away) return;
   const p = cam.ppm, z = visAlt(f), gx = sx(f.x), gy = sy(f.y), ax = gx, ay = sy(f.y - z);
   if (!f.ko && f.trail.length > 2) {
     ctx.lineCap = 'round';
@@ -1350,14 +1453,14 @@ function drawAir(f) {
     const w = Math.max(34, 10 * p), bh = Math.max(4, Math.min(10, 0.6 * p)), top = ay - 8.5 * p - bh;
     hpBar(f, ax, top, w, bh);
     ctx.fillStyle = '#fff'; ctx.font = '10px "JetBrains Mono", monospace'; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
-    ctx.fillText(f.retired ? 'regresa a base' : `${Math.round(f.alt)} m`, ax, top - 4);
+    ctx.fillText(f.rearming ? 'vuelve a rearmarse' : `${Math.round(f.alt)} m · ${Math.round(f.v)} m/s`, ax, top - 4);
   }
 }
 
 /* indicador en el borde para aviones fuera de la vista */
 function drawOffscreen() {
   for (const f of fighters) {
-    if (f.def.domain !== 'air' || f.gone || f.crashed) continue;
+    if (f.def.domain !== 'air' || f.gone || f.crashed || f.away) continue;
     const X = sx(f.x), Y = sy(f.y - visAlt(f));
     if (X >= 0 && X <= CW && Y >= 0 && Y <= CH) continue;
     const m = 26, cx = clamp(X, m, CW - m), cy = clamp(Y, m, CH - m), a = Math.atan2(Y - cy, X - cx);
@@ -1478,13 +1581,14 @@ function drawEffect(e) {
 }
 
 function drawScaleBar() {
-  const meters = cam.ppm > 40 ? 2 : cam.ppm > 15 ? 5 : cam.ppm > 6 ? 10 : 20;
+  const nice = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000];
+  const meters = nice.find(v => v * cam.ppm >= 60) || 1000;
   const w = meters * cam.ppm, x = 18, y = CH - 22;
   ctx.fillStyle = 'rgba(20,16,32,.75)'; ctx.beginPath(); ctx.roundRect(x - 8, y - 14, w + 16, 26, 8); ctx.fill();
   ctx.strokeStyle = '#fff'; ctx.lineWidth = 2;
   ctx.beginPath(); ctx.moveTo(x, y + 2); ctx.lineTo(x, y + 7); ctx.lineTo(x + w, y + 7); ctx.lineTo(x + w, y + 2); ctx.stroke();
   ctx.fillStyle = '#fff'; ctx.font = '11px "JetBrains Mono", monospace'; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
-  ctx.fillText(`${meters} m`, x + w / 2, y + 1);
+  ctx.fillText(meters >= 1000 ? `${meters / 1000} km` : `${meters} m`, x + w / 2, y + 1);
 }
 
 let ghostPos = null;
@@ -1495,14 +1599,15 @@ function render(rdt) {
   grassPat.setTransform(new DOMMatrix([cam.ppm / MPX, 0, 0, cam.ppm / MPX, sx(0), sy(0)]));
   ctx.fillStyle = grassPat; ctx.fillRect(0, 0, CW, CH);
   if (shake > 0.1) { ctx.translate(rand(-shake, shake) * 0.5, rand(-shake, shake) * 0.5); shake *= Math.exp(-14 * rdt * Math.max(0.15, SIM.timeScale)); } else shake = 0;
-  ctx.drawImage(mapCv, sx(0), sy(0), MAP.W * cam.ppm, MAP.H * cam.ppm);
+  drawField();
+  ctx.drawImage(mapCv, sx(AREN.x), sy(AREN.y), AREN.W * cam.ppm, AREN.H * cam.ppm);
   for (const c of craters) {
     const x = sx(c.x), y = sy(c.y), r = c.r * cam.ppm;
     ctx.fillStyle = 'rgba(60,45,30,.55)'; ctx.beginPath(); ctx.ellipse(x, y, r * 1.25, r * 0.7, 0, 0, 7); ctx.fill();
     ctx.fillStyle = 'rgba(30,22,15,.6)'; ctx.beginPath(); ctx.ellipse(x, y, r * 0.8, r * 0.42, 0, 0, 7); ctx.fill();
   }
   const items = [
-    ...decor.map(d => ({ y: d.y, d })),
+    ...decor.filter(d => d.x > wx(0) - 5 && d.x < wx(CW) + 5 && d.y > wy(0) - 2 && d.y < wy(CH) + 8).map(d => ({ y: d.y, d })),
     ...fighters.filter(f => f.def.domain !== 'air').map(f => ({ y: f.ko && !f.def.heavy ? f.y - 0.5 : f.y, f })),
     ...effects.filter(e => !e.air).map(e => ({ y: e.sortY ?? (e.f ? e.f.y + 0.01 : e.y + 0.5), e })),
   ].sort((a, b) => a.y - b.y);
@@ -1702,7 +1807,7 @@ function renderRoster() {
 function updateTeams() {
   const el = document.getElementById('teams');
   const html = Object.values(TEAMS).map(T => {
-    const all = fighters.filter(f => f.team === T).length, up = fighters.filter(f => f.team === T && active(f)).length;
+    const all = fighters.filter(f => f.team === T).length, up = fighters.filter(f => f.team === T && (active(f) || f.rearming)).length;
     return `<span style="--c:${T.color}">${T.name} ${up}/${all}</span>`;
   }).join('');
   if (el.innerHTML !== html) el.innerHTML = html;
@@ -1714,17 +1819,15 @@ const SLOW = 0.04;
 SIM.auto = 1;
 function autoSlowTarget() {
   if (!document.getElementById('autoSlow').checked || !CW) return 1;
-  const m = 250, x0 = wx(0) - m, x1 = wx(CW) + m, y0 = wy(0) - m, y1 = wy(CH) + m;
-  const inView = (x, y) => x > x0 && x < x1 && y > y0 && y < y1;
-  const busy = bullets.some(b => b.kind === 'missile' || b.kind === 'bomb');
-  for (const f of fighters) {
-    if (f.def.domain !== 'air' || f.gone || f.crashed || !inView(f.x, f.y)) continue;
-    if (!cam.jet || f.ko || f.gun || busy) return SLOW;
-    const t = nearestEnemy(f);
-    if (t && dist3(f, t) < 1500) return SLOW;
-  }
-  for (const b of bullets) if ((b.kind === 'missile' || b.kind === 'bomb') && !b.done && inView(b.x, b.y)) return SLOW;
-  return 1;
+  // a la vista o a punto de entrar (lo que recorrería en 0.08 s reales)
+  const viewW = CW / cam.ppm, X0 = wx(0), X1 = wx(CW), Y0 = wy(0), Y1 = wy(CH);
+  const inView = (x, y, v) => { const m = 15 + v * SIM.timeScale * 0.08; return x > X0 - m && x < X1 + m && y > Y0 - m && y < Y1 + m; };
+  let vmax = 0;
+  for (const f of fighters) if (f.def.domain === 'air' && !f.gone && !f.crashed && !f.away && inView(f.x, f.y - visAlt(f), f.v)) vmax = Math.max(vmax, f.v);
+  for (const b of bullets) if ((b.kind === 'missile' || b.kind === 'bomb') && !b.done && inView(b.x, b.y, b.speed)) vmax = Math.max(vmax, b.speed);
+  if (!vmax) return 1;
+  // que lo más rápido a la vista cruce como máximo media pantalla por segundo
+  return clamp(0.5 * viewW / (vmax * SIM.timeScale), 0.02, 1);
 }
 
 /* radar: muestra aviones y misiles alrededor del mapa */
@@ -1732,7 +1835,7 @@ const radar = document.getElementById('radar'), rctx = radar.getContext('2d');
 let radarRange = 1000;
 function drawRadar() {
   const S = radar.width, c = S / 2, cx0 = MAP.W / 2, cy0r = MAP.H / 2;
-  let far = 600;
+  let far = Math.hypot(MAP.W, MAP.H) / 2;
   for (const f of fighters) if (f.def.domain === 'air' && !f.gone && !f.crashed) far = Math.max(far, Math.hypot(f.x - cx0, f.y - cy0r));
   for (const b of bullets) if (b.kind === 'missile' && !b.done) far = Math.max(far, Math.hypot(b.x - cx0, b.y - cy0r));
   const nice = [1000, 2000, 5000, 10000, 20000, 50000, 100000, 200000];
@@ -1759,7 +1862,7 @@ function drawRadar() {
     const [x, y] = P(b.x, b.y); rctx.fillStyle = '#fff'; rctx.beginPath(); rctx.arc(x, y, 3, 0, 7); rctx.fill();
   }
   for (const f of fighters) {
-    if (f.def.domain !== 'air' || f.gone || f.crashed) continue;
+    if (f.def.domain !== 'air' || f.gone || f.crashed || f.away) continue;
     const [x, y] = P(f.x, f.y);
     rctx.save(); rctx.translate(x, y); rctx.rotate(f.heading);
     rctx.fillStyle = f.ko ? '#888' : f.team.color; rctx.strokeStyle = '#fff'; rctx.lineWidth = 1.5;
@@ -1776,7 +1879,7 @@ radar.addEventListener('click', e => {
   const k = (S / 2 - 8) / radarRange;
   let best = null, bd = 30;
   for (const f of fighters) {
-    if (f.def.domain !== 'air' || f.gone || f.crashed) continue;
+    if (f.def.domain !== 'air' || f.gone || f.crashed || f.away) continue;
     const d = Math.hypot(c + (f.x - MAP.W / 2) * k - px, c + (f.y - MAP.H / 2) * k - py);
     if (d < bd) { bd = d; best = f; }
   }
@@ -1797,7 +1900,7 @@ function frame(now) {
   updateTeams();
   refreshHint();
   drawRadar();
-  const st = document.getElementById('slowTag'), slow = SIM.auto < 0.5;
+  const st = document.getElementById('slowTag'), slow = SIM.auto < 0.9;
   st.hidden = !slow;
   if (slow) { const t = `Cámara lenta automática ×${(SIM.timeScale * SIM.auto).toFixed(2)}`; if (st.textContent !== t) st.textContent = t; }
   if (CW > 0) render(SIM.paused ? 0 : rdt);
