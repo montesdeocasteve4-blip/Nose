@@ -127,7 +127,7 @@ label.check{display:flex;gap:8px;align-items:center;font-size:13px}
         <button class="primary" id="restartBtn">Iniciar combate</button>
         <label class="check"><input type="checkbox" id="autoRematch" checked> Revancha automática</label>
       </div>
-      <p class="note">Por ahora el combate es 1 contra 1 y solo hay humanos.</p>
+      <p class="note">Por ahora el combate es 1 contra 1. La vida y el daño están a escala real: un humano cae con unos 10 impactos de otro humano.</p>
     </section>
 
     <section class="panel log-panel">
@@ -140,22 +140,90 @@ label.check{display:flex;gap:8px;align-items:center;font-size:13px}
 <script>
 /* =====================================================================
    ESPECIES — para añadir personajes nuevos, agrega una entrada aquí.
-   Unidades: metros, segundos, m/s. La velocidad se aplica en update().
+   Unidades: metros, segundos, m/s.
+   speed        = velocidad de caminata/carrera (m/s)
+   attackSpeed  = velocidad del ataque (m/s): cada fase del golpe recorre
+                  una distancia en metros a esa velocidad
+                  (duración = windupDist|strikeDist|recoverDist / attackSpeed)
    ===================================================================== */
+
+/* poses: [inclinación torso, altura cadera, brazoDel(sup, codo), brazoTras(sup, codo), piernaDel(muslo, rodilla), piernaTras(muslo, rodilla), (lanza)]
+   ángulos en radianes, 0 = hacia abajo, + = hacia adelante */
+function humanRun(p) {
+  const s = Math.sin(p), c = Math.cos(p);
+  return [0.30, 0.90 + 0.035 * Math.abs(s),
+    0.25 - 0.75 * s, 1.65, 0.25 + 0.75 * s, 1.65,
+    0.10 + 0.80 * s, 0.25 + 1.2 * Math.max(0, c),
+    0.10 - 0.80 * s, 0.25 + 1.2 * Math.max(0, -c)];
+}
+
 const SPECIES = {
   human: {
     name: 'Humano',
-    hp: 100,
-    speed: 7,            // m/s, velocidad máxima de desplazamiento
-    height: 1.75,        // m
-    bodyRadius: 0.28,    // m, para separación entre cuerpos
-    strideLength: 2.2,   // m por ciclo de carrera (sincroniza piernas con la velocidad)
+    hp: 0.0000012,          // 10 impactos de 0.00000012 lo derriban
+    speed: 7,               // m/s caminata
+    attackSpeed: 4,         // m/s ataque
+    height: 1.75, bodyRadius: 0.28, strideLength: 2.2,
     attacks: {
-      punch: { name: 'Golpe',  damage: 8, reach: 0.95, windup: 0.13, active: 0.07, recover: 0.20, knock: 2.2, stun: 0.22 },
-      kick:  { name: 'Patada', damage: 8, reach: 1.30, windup: 0.22, active: 0.09, recover: 0.32, knock: 3.4, stun: 0.30 },
+      punch: { name: 'Golpe', damage: 0.00000012, reach: 0.95, windupDist: 0.25, strikeDist: 0.5, recoverDist: 0.5, lunge: 0.15,
+        knock: 2.2, stun: 0.22, min: 0.5, max: 1.0, weight: 0.65,
+        poses: [{ ch: 'jabCh', ex: 'jabEx', eff: 'armF' }, { ch: 'crossCh', ex: 'crossEx', eff: 'armB' }] },
+      kick: { name: 'Patada', damage: 0.00000012, reach: 1.30, windupDist: 0.45, strikeDist: 0.8, recoverDist: 0.8, lunge: 0,
+        knock: 3.4, stun: 0.30, min: 0.6, max: 1.4, weight: 0.35,
+        poses: [{ ch: 'kickCh', ex: 'kickEx', eff: 'legF' }] },
     },
+    ai: { keep: 0.82, tooClose: 0.5, cooldown: [0.12, 0.5] },
+    poses: {
+      guard:   [0.10, 0.92, 0.55, 1.95, 0.25, 2.25, 0.32, 0.25, -0.28, 0.18],
+      jabCh:   [0.04, 0.90, 0.30, 2.45, 0.25, 2.25, 0.35, 0.30, -0.30, 0.20],
+      jabEx:   [0.32, 0.90, 1.56, 0.04, 0.30, 2.30, 0.45, 0.35, -0.38, 0.10],
+      crossCh: [0.00, 0.90, 0.60, 2.05, 0.05, 2.55, 0.32, 0.28, -0.30, 0.20],
+      crossEx: [0.40, 0.88, 0.75, 2.10, 1.52, 0.04, 0.52, 0.42, -0.48, 0.05],
+      kickCh:  [-0.05, 0.94, 0.80, 1.60, 0.05, 2.10, 1.25, 2.15, -0.08, 0.10],
+      kickEx:  [-0.34, 0.95, 1.00, 1.00, -0.55, 0.90, 1.56, 0.00, -0.16, 0.04],
+      hit:     [-0.36, 0.88, 0.95, 0.70, 1.25, 0.50, 0.12, 0.30, -0.38, 0.30],
+    },
+    run: humanRun,
     look: { skin: ['#e2b48c', '#b07a52'], hair: ['#3a2716', '#16110c'] },
     draw: drawHuman,
+  },
+
+  /* Ares, dios griego de la guerra: hoplita de bronce con casco corintio, dory (lanza) y aspis (escudo).
+     En la Ilíada grita como nueve o diez mil guerreros y se lanza a la carga sin medida. */
+  ares: {
+    name: 'Ares',
+    hp: 1,
+    speed: 7,               // m/s caminata (velocidad base)
+    attackSpeed: 20,        // m/s solo al atacar (incluye la embestida)
+    height: 2.1, bodyRadius: 0.32, strideLength: 2.5,
+    warCry: true,
+    attacks: {
+      dory: { name: 'Lanzazo', damage: 1.6, reach: 2.3, windupDist: 0.6, strikeDist: 1.6, recoverDist: 1.2, lunge: 0.4,
+        knock: 8, stun: 0.3, min: 1.2, max: 2.4, weight: 0.7,
+        poses: [{ ch: 'doryCh', ex: 'doryEx', eff: 'spear' }] },
+      aspis: { name: 'Golpe de escudo', damage: 1.6, reach: 1.1, windupDist: 0.4, strikeDist: 0.9, recoverDist: 0.8, lunge: 0.5,
+        knock: 10, stun: 0.35, min: 0.3, max: 1.2, weight: 1,
+        poses: [{ ch: 'aspisCh', ex: 'aspisEx', eff: 'shield' }] },
+      charge: { name: 'Embestida', damage: 1.6, reach: 2.3, windupDist: 0.5, strikeDist: 1.6, recoverDist: 1.4, dash: true,
+        knock: 12, stun: 0.4, min: 3, max: 12, weight: 1,
+        poses: [{ ch: 'doryCh', ex: 'doryEx', eff: 'spear' }] },
+    },
+    ai: { keep: 1.9, tooClose: 0.45, cooldown: [0.05, 0.25] },
+    poses: {
+      guard:   [0.08, 0.90, 0.85, 1.35, 0.25, 1.45, 0.30, 0.22, -0.30, 0.15, 1.72],
+      doryCh:  [-0.06, 0.90, 0.70, 1.50, -0.55, 1.20, 0.30, 0.25, -0.35, 0.15, 1.62],
+      doryEx:  [0.38, 0.86, 0.50, 1.60, 1.45, 0.08, 0.80, 0.35, -0.75, 0.05, 1.60],
+      aspisCh: [-0.02, 0.90, 0.45, 1.90, 0.10, 1.50, 0.30, 0.25, -0.30, 0.15, 1.75],
+      aspisEx: [0.35, 0.87, 1.40, 0.35, -0.10, 1.50, 0.75, 0.35, -0.70, 0.05, 1.85],
+      hit:     [-0.30, 0.88, 0.90, 1.00, 0.60, 1.20, 0.12, 0.30, -0.38, 0.30, 2.20],
+    },
+    run(p) {
+      const r = humanRun(p), s = Math.sin(p);
+      r[2] = 0.75; r[3] = 1.45; r[4] = 0.25 + 0.35 * s; r[5] = 1.45; r[0] = 0.25;
+      r.push(1.8);
+      return r;
+    },
+    draw: drawAres,
   },
 };
 
@@ -164,9 +232,9 @@ const CORNERS = [
   { key: 'B', name: 'Roja', color: '#d6453a', pants: '#3a2a28', wrap: '#ffc0b5' },
 ];
 
-const ARENA = { W: 20, D: 6 };       // metros
+const ARENA = { W: 20, D: 6 };
 const SIM = { timeScale: 1, paused: false, time: 0, over: false, overT: 0 };
-const FIXED = 1 / 120;               // paso fijo de simulación (s)
+const FIXED = 1 / 240;               // paso fijo (s): fino para ataques de 20 m/s
 
 /* ---------- utilidades ---------- */
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -176,30 +244,34 @@ const easeOut = t => 1 - Math.pow(1 - t, 3);
 const easeInOut = t => t < .5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
 function shade(hex, f) {
   const n = parseInt(hex.slice(1), 16);
-  let r = n >> 16, g = (n >> 8) & 255, b = n & 255;
-  r = clamp(Math.round(r * f), 0, 255); g = clamp(Math.round(g * f), 0, 255); b = clamp(Math.round(b * f), 0, 255);
+  const r = clamp(Math.round((n >> 16) * f), 0, 255), g = clamp(Math.round(((n >> 8) & 255) * f), 0, 255), b = clamp(Math.round((n & 255) * f), 0, 255);
   return `rgb(${r},${g},${b})`;
 }
+function fmt(n) {
+  if (Number.isInteger(n)) return String(n);
+  return n.toFixed(10).replace(/0+$/, '').replace(/\.$/, '');
+}
+const fmtTime = s => s < 0.1 ? (s * 1000).toFixed(0) + ' ms' : s.toFixed(2) + ' s';
 
 /* ---------- estado ---------- */
 let fighters = [];
 let effects = [];
 let shake = 0;
-const selection = { A: 'human', B: 'human' };
+const selection = { A: 'human', B: 'ares' };
 
 function makeFighter(cornerIdx, speciesKey) {
   const c = CORNERS[cornerIdx], def = SPECIES[speciesKey];
-  const v = cornerIdx;
+  const look = def.look || { skin: ['#d39a6a'], hair: ['#2a1a10'] };
   return {
     corner: c, team: c.key, def, speciesKey,
     x: cornerIdx === 0 ? ARENA.W * 0.25 : ARENA.W * 0.75,
     z: ARENA.D / 2 + rand(-1, 1),
     face: cornerIdx === 0 ? 1 : -1,
     hp: def.hp, vx: 0, vz: 0, kbx: 0, kbz: 0,
-    attack: null, stun: 0, cooldown: rand(0.2, 0.5), strafe: Math.random() < .5 ? 1 : -1, strafeT: 0,
-    runPhase: Math.random() * 6, runBlend: 0, flash: 0, koT: 0, ko: false, nextHand: 0,
-    trail: [], hits: 0, dealt: 0,
-    skin: def.look.skin[v % def.look.skin.length], hair: def.look.hair[v % def.look.hair.length],
+    attack: null, stun: 0, cooldown: rand(0.3, 0.6), strafe: 1, strafeT: 0,
+    runPhase: Math.random() * 6, runBlend: 0, flash: 0, koT: 0, ko: false, nextVar: 0,
+    trail: [], ghosts: [], hits: 0, dealt: 0,
+    skin: look.skin[cornerIdx % look.skin.length], hair: look.hair[cornerIdx % look.hair.length],
   };
 }
 
@@ -209,43 +281,38 @@ function resetMatch() {
   document.getElementById('banner').hidden = true;
   document.getElementById('log').innerHTML = '';
   addLog(null, 'Comienza el combate', '');
-  cam.x = ARENA.W / 2; cam.init = false;
+  for (const f of fighters) if (f.def.warCry) {
+    effects.push({ kind: 'cry', f, x: f.x, y: 0, z: f.z, t: 0, life: 1.2 });
+    addLog(f, `${f.def.name} lanza su grito de guerra`, '');
+  }
+  cam.init = false;
   updateHUD(true); renderCorners();
 }
 
-/* ---------- poses (ángulos en radianes, 0 = hacia abajo, + = hacia adelante) ----------
-   [inclinación torso, altura cadera, brazoDel(sup, codo), brazoTras(sup, codo), piernaDel(muslo, rodilla), piernaTras(muslo, rodilla)] */
-const P = {
-  guard:      [0.10, 0.92, 0.55, 1.95, 0.25, 2.25, 0.32, 0.25, -0.28, 0.18],
-  jabCh:      [0.04, 0.90, 0.30, 2.45, 0.25, 2.25, 0.35, 0.30, -0.30, 0.20],
-  jabEx:      [0.32, 0.90, 1.56, 0.04, 0.30, 2.30, 0.45, 0.35, -0.38, 0.10],
-  crossCh:    [0.00, 0.90, 0.60, 2.05, 0.05, 2.55, 0.32, 0.28, -0.30, 0.20],
-  crossEx:    [0.40, 0.88, 0.75, 2.10, 1.52, 0.04, 0.52, 0.42, -0.48, 0.05],
-  kickCh:     [-0.05, 0.94, 0.80, 1.60, 0.05, 2.10, 1.25, 2.15, -0.08, 0.10],
-  kickEx:     [-0.34, 0.95, 1.00, 1.00, -0.55, 0.90, 1.56, 0.00, -0.16, 0.04],
-  hit:        [-0.36, 0.88, 0.95, 0.70, 1.25, 0.50, 0.12, 0.30, -0.38, 0.30],
-};
-function runPose(p) {
-  const s = Math.sin(p), c = Math.cos(p);
-  return [0.30, 0.90 + 0.035 * Math.abs(s),
-    0.25 - 0.75 * s, 1.65, 0.25 + 0.75 * s, 1.65,
-    0.10 + 0.80 * s, 0.25 + 1.2 * Math.max(0, c),
-    0.10 - 0.80 * s, 0.25 + 1.2 * Math.max(0, -c)];
-}
+/* ---------- poses ---------- */
 const lerpPose = (a, b, t) => a.map((v, i) => lerp(v, b[i], t));
 
+function attackTimes(a) { return [a.windup, a.strike, a.recover]; }
+
 function currentPose(f) {
+  const P = f.def.poses;
+  if (f.ko) return P.hit;
   if (f.stun > 0) return lerpPose(P.guard, P.hit, Math.min(1, f.stun / 0.12));
-  let base = lerpPose(P.guard, runPose(f.runPhase), f.runBlend);
+  let base = lerpPose(P.guard, f.def.run(f.runPhase), f.runBlend);
   base[1] += Math.sin(SIM.time * 3.2 + f.corner.key.charCodeAt(0)) * 0.008 * (1 - f.runBlend);
   const a = f.attack;
   if (!a) return base;
-  const A = a.def, t = a.t;
-  const ch = a.type === 'kick' ? P.kickCh : (a.hand ? P.crossCh : P.jabCh);
-  const ex = a.type === 'kick' ? P.kickEx : (a.hand ? P.crossEx : P.jabEx);
-  if (t < A.windup) return lerpPose(base, ch, easeInOut(t / A.windup));
-  if (t < A.windup + A.active) return lerpPose(ch, ex, easeOut(Math.min(1, (t - A.windup) / (A.active * 0.6))));
-  return lerpPose(ex, P.guard, easeInOut(Math.min(1, (t - A.windup - A.active) / A.recover)));
+  const ch = P[a.variant.ch], ex = P[a.variant.ex], t = a.t;
+  if (t < a.windup) return lerpPose(base, ch, easeInOut(t / a.windup));
+  const ts = t - a.windup;
+  if (ts < a.strike) {
+    // la extensión ocupa el final de la fase (en la embestida primero se corre)
+    const thrustDur = a.thrust, start = a.strike - thrustDur;
+    const hold = a.def.dash ? lerpPose(f.def.run(f.runPhase), ch, 0.6) : ch;
+    if (ts < start) return hold;
+    return lerpPose(hold, ex, easeOut((ts - start) / thrustDur));
+  }
+  return lerpPose(ex, P.guard, easeInOut(Math.min(1, (ts - a.strike) / a.recover)));
 }
 
 /* esqueleto en metros locales: origen en los pies, y hacia arriba, +x hacia donde mira */
@@ -257,24 +324,29 @@ function limb(o, a, bend, L1, L2, sign) {
 }
 function skeleton(pose, h) {
   const k = h / 1.75;
-  const [lean, hipY, aF0, aF1, aB0, aB1, lF0, lF1, lB0, lB1] = pose;
+  const [lean, hipY, aF0, aF1, aB0, aB1, lF0, lF1, lB0, lB1, spearA] = pose;
   const hip = { x: 0, y: hipY * k };
   const sh = { x: hip.x + 0.50 * k * Math.sin(lean), y: hip.y + 0.50 * k * Math.cos(lean) };
   const head = { x: sh.x + 0.20 * k * Math.sin(lean * .7), y: sh.y + 0.20 * k * Math.cos(lean * .7) };
-  return {
-    hip, sh, head, k,
+  const sk = {
+    hip, sh, head, k, lean,
     armF: limb({ x: sh.x + 0.03 * k, y: sh.y }, aF0, aF1, 0.30 * k, 0.29 * k, 1),
     armB: limb({ x: sh.x - 0.03 * k, y: sh.y }, aB0, aB1, 0.30 * k, 0.29 * k, 1),
     legF: limb({ x: hip.x + 0.02 * k, y: hip.y }, lF0, lF1, 0.47 * k, 0.46 * k, -1),
     legB: limb({ x: hip.x - 0.02 * k, y: hip.y }, lB0, lB1, 0.47 * k, 0.46 * k, -1),
   };
+  if (spearA !== undefined) {
+    const d = { x: Math.sin(spearA), y: -Math.cos(spearA) }, g = sk.armB.j2;
+    sk.spear = { dir: d, butt: { x: g.x - d.x * 0.95 * k, y: g.y - d.y * 0.95 * k }, tip: { x: g.x + d.x * 1.45 * k, y: g.y + d.y * 1.45 * k } };
+    const m = { x: lerp(sk.armF.j1.x, sk.armF.j2.x, 0.6), y: lerp(sk.armF.j1.y, sk.armF.j2.y, 0.6) };
+    sk.shield = { x: m.x + 0.07 * k, y: m.y };
+  }
+  return sk;
 }
-function effector(f) {
-  const sk = skeleton(currentPose(f), f.def.height);
-  const a = f.attack;
-  if (!a) return sk.armF.j2;
-  if (a.type === 'kick') return sk.legF.j2;
-  return a.hand ? sk.armB.j2 : sk.armF.j2;
+function effectorOf(sk, eff) {
+  if (eff === 'spear') return sk.spear.tip;
+  if (eff === 'shield') return { x: sk.shield.x + 0.12 * sk.k, y: sk.shield.y };
+  return sk[eff].j2;
 }
 
 /* ---------- lógica ---------- */
@@ -288,68 +360,75 @@ function nearestEnemy(f) {
   return best;
 }
 
-function startAttack(f, type) {
-  const def = f.def.attacks[type];
-  f.attack = { type, def, t: 0, hitDone: false, hand: type === 'punch' ? f.nextHand : 0 };
-  if (type === 'punch') f.nextHand ^= 1;
+function startAttack(f, type, target) {
+  const def = f.def.attacks[type], as = f.def.attackSpeed;
+  const variant = def.poses[f.nextVar % def.poses.length]; f.nextVar++;
+  const windup = def.windupDist / as, thrust = def.strikeDist / as, recover = def.recoverDist / as;
+  let dist = def.lunge || 0, dir = { x: f.face, z: 0 };
+  if (def.dash && target) {
+    const tx = (target.x - f.x) - f.face * def.reach * 0.75, tz = target.z - f.z;
+    dist = Math.hypot(tx, tz) || 0.01; dir = { x: tx / dist, z: tz / dist };
+  }
+  const strike = Math.max(thrust, dist / as);
+  f.attack = { type, def, variant, t: 0, hitDone: false, windup, strike, thrust, recover,
+    vel: { x: dir.x * dist / strike, z: dir.z * dist / strike } };
   f.trail = [];
+  if (def.dash) effects.push({ kind: 'dust', x: f.x - f.face * 0.3, y: 0, z: f.z, t: 0, life: 0.6, face: -f.face });
 }
 
 function update(dt) {
   SIM.time += dt;
   for (const f of fighters) {
     f.flash = Math.max(0, f.flash - dt);
-    // retroceso
     f.x += f.kbx * dt; f.z += f.kbz * dt;
-    const decay = Math.exp(-7 * dt); f.kbx *= decay; f.kbz *= decay;
-    if (f.ko) { f.koT += dt; f.runBlend = 0; continue; }
-
-    if (f.stun > 0) { f.stun -= dt; f.runBlend = Math.max(0, f.runBlend - dt * 6); clampArena(f); continue; }
+    const decay = Math.exp(-6 * dt); f.kbx *= decay; f.kbz *= decay;
+    if (f.ko) { f.koT += dt; f.runBlend = 0; clampArena(f); continue; }
+    if (f.stun > 0) { f.stun -= dt; f.vx *= decay; f.vz *= decay; f.runBlend = Math.max(0, f.runBlend - dt * 6); clampArena(f); continue; }
 
     const t = nearestEnemy(f);
-    let mvx = 0, mvz = 0;
+    let tvx = 0, tvz = 0, direct = false;
+    const walk = f.def.speed;
     if (t) {
       const dx = t.x - f.x, dz = t.z - f.z, adx = Math.abs(dx);
       if (!f.attack) f.face = dx >= 0 ? 1 : -1;
 
       if (f.attack) {
-        const a = f.attack, A = a.def;
+        const a = f.attack;
         a.t += dt;
-        if (!a.hitDone && a.t >= A.windup) {
-          a.hitDone = true;
-          tryHit(f, a);
-        }
-        if (a.t >= A.windup + A.active + A.recover) { f.attack = null; f.cooldown = rand(0.12, 0.5); }
-        // pequeño paso al golpear
-        if (a.t < A.windup + A.active) mvx = f.face * 0.12 * f.def.speed * (a.type === 'punch' ? 1 : 0.3);
+        const ts = a.t - a.windup;
+        if (ts >= 0 && ts < a.strike) { tvx = a.vel.x; tvz = a.vel.z; direct = true; }
+        if (!a.hitDone && ts >= a.strike) { a.hitDone = true; tryHit(f, a); }
+        if (a.t >= a.windup + a.strike + a.recover) { f.attack = null; f.cooldown = rand(...f.def.ai.cooldown); }
+        if (a.def.dash && direct && Math.random() < dt * 60) f.ghosts.push({ x: f.x, z: f.z, face: f.face, pose: currentPose(f), t: SIM.time });
       } else {
         f.cooldown -= dt;
         f.strafeT -= dt;
         if (f.strafeT <= 0) { f.strafe = Math.random() < .5 ? 1 : -1; f.strafeT = rand(0.4, 1.1); }
-        const punchR = f.def.attacks.punch.reach, kickR = f.def.attacks.kick.reach;
-        const aligned = Math.abs(dz) < 0.35;
-        if (adx > kickR + 0.35 || !aligned) {
-          // acercarse: objetivo a distancia de golpe
-          const tx = dx - f.face * (punchR * 0.85), tz = dz;
-          const len = Math.hypot(tx, tz) || 1;
-          mvx = tx / len; mvz = tz / len;
-          const sp = Math.min(1, len / 0.6);
-          mvx *= sp; mvz *= sp;
-        } else if (adx < 0.55) {
-          mvx = -f.face * 0.7;           // demasiado cerca: retroceder
-        } else if (f.cooldown <= 0) {
-          const type = adx > punchR + 0.05 ? (Math.random() < .8 ? 'kick' : null) : (Math.random() < .65 ? 'punch' : 'kick');
-          if (type) startAttack(f, type); else mvx = f.face * 0.5;
-        } else {
-          mvz = f.strafe * 0.3; mvx = (Math.random() < .5 ? -1 : 1) * 0.15;
+        const atks = Object.entries(f.def.attacks);
+        if (f.cooldown <= 0) {
+          const opts = atks.filter(([, A]) => adx >= A.min && adx <= A.max && Math.abs(dz) < (A.dash ? 0.8 : 0.4));
+          if (opts.length) {
+            let r = Math.random() * opts.reduce((s, [, A]) => s + A.weight, 0);
+            const pick = opts.find(([, A]) => (r -= A.weight) <= 0) || opts[0];
+            startAttack(f, pick[0], t);
+          } else f.cooldown = 0.08;
+        }
+        if (!f.attack) {
+          const keep = f.def.ai.keep, aligned = Math.abs(dz) < 0.35;
+          if (adx > keep + 0.2 || !aligned) {
+            const tx = dx - f.face * keep, tz = dz, len = Math.hypot(tx, tz) || 1;
+            const sp = Math.min(1, len / 0.6) * walk;
+            tvx = tx / len * sp; tvz = tz / len * sp;
+          } else if (adx < f.def.ai.tooClose) {
+            tvx = -f.face * 0.7 * walk;
+          } else {
+            tvz = f.strafe * 0.3 * walk; tvx = (Math.random() < .5 ? -1 : 1) * 0.15 * walk;
+          }
         }
       }
     }
-    // velocidad real en m/s
-    const sp = f.def.speed;
-    const tvx = mvx * sp, tvz = mvz * sp;
-    const acc = 1 - Math.exp(-14 * dt);
-    f.vx += (tvx - f.vx) * acc; f.vz += (tvz - f.vz) * acc;
+    if (direct) { f.vx = tvx; f.vz = tvz; }
+    else { const acc = 1 - Math.exp(-14 * dt); f.vx += (tvx - f.vx) * acc; f.vz += (tvz - f.vz) * acc; }
     f.x += f.vx * dt; f.z += f.vz * dt;
     const speedNow = Math.hypot(f.vx, f.vz);
     f.runPhase += (speedNow / f.def.strideLength) * Math.PI * 2 * dt;
@@ -360,13 +439,12 @@ function update(dt) {
   separate();
   for (const e of effects) e.t += dt;
   effects = effects.filter(e => e.t < e.life);
+  for (const f of fighters) if (f.ghosts.length) f.ghosts = f.ghosts.filter(g => SIM.time - g.t < 0.14);
 
   if (!SIM.over) {
     const alive = new Set(fighters.filter(f => !f.ko).map(f => f.team));
     if (alive.size <= 1) endMatch([...alive][0]);
-  } else {
-    SIM.overT += dt;
-  }
+  } else SIM.overT += dt;
 }
 
 function clampArena(f) { f.x = clamp(f.x, 0.5, ARENA.W - 0.5); f.z = clamp(f.z, 0.2, ARENA.D - 0.2); }
@@ -388,30 +466,35 @@ function tryHit(f, a) {
   for (const o of fighters) {
     if (o === f || o.ko || o.team === f.team) continue;
     const dx = (o.x - f.x) * f.face, dz = Math.abs(o.z - f.z);
-    if (dx > 0 && dx <= A.reach + 0.15 && dz < 0.5) {
-      applyHit(f, o, a);
-      return;
-    }
+    if (dx > 0 && dx <= A.reach + 0.15 && dz < 0.5) { applyHit(f, o, a); return; }
   }
   addLog(f, `${A.name} al aire`, '', true);
 }
 
 function applyHit(f, o, a) {
   const A = a.def;
-  o.hp = Math.max(0, o.hp - A.damage);
-  o.stun = A.stun; o.attack = null; o.flash = 0.12;
-  o.kbx = f.face * A.knock; o.kbz = rand(-0.4, 0.4);
+  o.hp -= A.damage;
+  if (o.hp <= o.def.hp * 1e-9) o.hp = 0;
   f.hits++; f.dealt += A.damage;
-  const e = effector(f);
+  // aguante: un impacto insignificante para la vida del objetivo no lo hace retroceder
+  const ratio = A.damage / o.def.hp;
+  const flinch = ratio >= 0.02;
+  if (flinch) { o.stun = A.stun; o.attack = null; o.flash = 0.12; o.kbx = f.face * A.knock; o.kbz = rand(-0.4, 0.4); }
+  const sk = skeleton(currentPose(f), f.def.height), e = effectorOf(sk, a.variant.eff);
   const ix = f.x + e.x * f.face, iy = e.y, iz = (f.z + o.z) / 2 + 0.01;
-  effects.push({ kind: 'spark', x: ix, y: iy, z: iz, t: 0, life: 0.35, big: a.type === 'kick', face: f.face,
-    parts: Array.from({ length: a.type === 'kick' ? 12 : 8 }, () => ({ a: rand(0, Math.PI * 2), v: rand(1.5, 4), r: rand(0.02, 0.05) })) });
-  effects.push({ kind: 'num', x: ix, y: iy + 0.15, z: iz, t: 0, life: 0.9, text: `−${A.damage}`, color: f.corner.color });
-  shake = Math.max(shake, a.type === 'kick' ? 7 : 4);
-  addLog(f, `${A.name} a ${o.corner.name}`, `−${A.damage}`);
+  if (flinch) {
+    const big = A.knock > 3;
+    effects.push({ kind: 'spark', x: ix, y: iy, z: iz, t: 0, life: 0.35, big, face: f.face,
+      parts: Array.from({ length: big ? 12 : 8 }, () => ({ a: rand(0, Math.PI * 2), v: rand(1.5, 4), r: rand(0.02, 0.05) })) });
+    shake = Math.max(shake, Math.min(12, A.knock * 1.2));
+  } else {
+    effects.push({ kind: 'clink', x: ix, y: iy, z: iz, t: 0, life: 0.25 });
+  }
+  effects.push({ kind: 'num', x: ix, y: iy + 0.15, z: iz, t: 0, life: 0.9, text: `−${fmt(A.damage)}`, small: !flinch });
+  addLog(f, `${A.name} a ${o.corner.name}`, `−${fmt(A.damage)}`);
   if (o.hp <= 0) {
-    o.ko = true; o.koT = 0; o.kbx = f.face * (A.knock + 2.5);
-    effects.push({ kind: 'dust', x: o.x - f.face * 1.2, y: 0, z: o.z, t: -0.35, life: 1.0, face: f.face });
+    o.ko = true; o.koT = 0; o.stun = 0; o.attack = null; o.kbx = f.face * (A.knock + 2.5);
+    effects.push({ kind: 'dust', x: o.x + f.face * 1.2, y: 0, z: o.z, t: -0.35, life: 1.0, face: f.face });
     addLog(o, `${o.corner.name} queda fuera de combate`, 'K.O.');
   }
 }
@@ -421,7 +504,7 @@ function endMatch(team) {
   const w = fighters.find(f => f.team === team);
   document.getElementById('bannerBig').textContent = 'K.O.';
   document.getElementById('bannerSmall').textContent = w
-    ? `Gana Esquina ${w.corner.name} · ${w.def.name} · ${w.hp} HP restantes`
+    ? `Gana Esquina ${w.corner.name} · ${w.def.name} · ${fmt(w.hp)} de vida`
     : 'Empate';
   document.getElementById('banner').hidden = false;
 }
@@ -464,10 +547,10 @@ function updateCamera(rdt) {
   const live = fighters.filter(f => !f.ko || f.koT < 2);
   const xs = (live.length ? live : fighters).map(f => f.x);
   const minX = Math.min(...xs), maxX = Math.max(...xs);
-  const spread = maxX - minX;
-  const viewW = clamp(spread + 7, 9, ARENA.W + 2);
+  const viewW = clamp(maxX - minX + 8, 10, ARENA.W + 2);
+  const maxH = Math.max(...fighters.map(f => f.def.height));
   let ppm = CW / viewW;
-  ppm = Math.min(ppm, (CH * 0.36 - 10) / 1.1, (CH * 0.64 - 12) / 2.7);
+  ppm = Math.min(ppm, (CH * 0.36 - 10) / 1.1, (CH * 0.64 - 30) / (1.08 + 0.87 * (maxH + 0.45)));
   const tx = clamp((minX + maxX) / 2, viewW / 2 - 1, ARENA.W + 1 - viewW / 2);
   if (!cam.init) { cam.x = tx; cam.ppm = ppm; cam.init = true; return; }
   const k = 1 - Math.exp(-3 * rdt);
@@ -491,16 +574,13 @@ function hill(u, a, b, c) { return Math.sin(u * a) * 0.5 + Math.sin(u * b + 1.3)
 
 function drawBackground() {
   const H = horizonY();
-  // cielo
   const sky = ctx.createLinearGradient(0, 0, 0, H);
   sky.addColorStop(0, '#5fb0e6'); sky.addColorStop(0.7, '#a9dbf3'); sky.addColorStop(1, '#e6f5ee');
   ctx.fillStyle = sky; ctx.fillRect(0, 0, CW, H + 2);
-  // sol
   const sx = CW * 0.82 - cam.x * 2, sy = CH * 0.12;
   const sg = ctx.createRadialGradient(sx, sy, 0, sx, sy, CH * 0.28);
   sg.addColorStop(0, 'rgba(255,250,215,.95)'); sg.addColorStop(0.12, 'rgba(255,244,190,.75)'); sg.addColorStop(1, 'rgba(255,244,190,0)');
   ctx.fillStyle = sg; ctx.fillRect(0, 0, CW, H);
-  // nubes
   ctx.fillStyle = 'rgba(255,255,255,.9)';
   for (const c of clouds) {
     const u = ((c.u + SIM.time * c.v - cam.x * 0.004) % 1.2 + 1.2) % 1.2 - 0.1;
@@ -511,7 +591,6 @@ function drawBackground() {
     ctx.ellipse(x + r * 0.6, y - r * 0.45, r * 1.2, r * 0.9, 0, 0, Math.PI * 2);
     ctx.fill();
   }
-  // colinas lejanas (parallax)
   const layers = [
     { par: 0.08, amp: 0.10, off: 0.10, col: '#9cc4a6', f: [0.9, 2.1, 3.7] },
     { par: 0.18, amp: 0.07, off: 0.045, col: '#7fb07a', f: [1.3, 2.9, 5.1] },
@@ -524,7 +603,6 @@ function drawBackground() {
     }
     ctx.lineTo(CW, H + 1); ctx.closePath(); ctx.fill();
   }
-  // línea de árboles
   for (const t of trees) {
     const span = CW * 1.6;
     const x = (((t.u * span - cam.x * cam.ppm * 0.3) % span) + span) % span - CW * 0.3;
@@ -535,11 +613,9 @@ function drawBackground() {
     ctx.fillStyle = 'rgba(255,255,220,.18)';
     ctx.beginPath(); ctx.ellipse(x + r * 0.25, y - r * 0.95, r * 0.35, r * 0.45, 0, 0, Math.PI * 2); ctx.fill();
   }
-  // campo
   const g = ctx.createLinearGradient(0, H, 0, CH);
   g.addColorStop(0, '#93c35d'); g.addColorStop(0.35, '#6faa3f'); g.addColorStop(1, '#4d8a2c');
   ctx.fillStyle = g; ctx.fillRect(0, H, CW, CH - H);
-  // franjas de corte
   for (let z = -12, i = 0; z < ARENA.D + 8; z += 1.5, i++) {
     if (i % 2) continue;
     const y0 = Math.max(H, groundY(z)), y1 = Math.max(H, groundY(z + 1.5));
@@ -547,11 +623,9 @@ function drawBackground() {
     ctx.fillStyle = 'rgba(255,255,210,.07)';
     ctx.fillRect(0, y0, CW, y1 - y0);
   }
-  // bruma en el horizonte
   const hz = ctx.createLinearGradient(0, H - 6, 0, H + CH * 0.08);
   hz.addColorStop(0, 'rgba(230,245,235,.55)'); hz.addColorStop(1, 'rgba(230,245,235,0)');
   ctx.fillStyle = hz; ctx.fillRect(0, H - 6, CW, CH * 0.08 + 6);
-  // zona pisada (tierra)
   const c = proj(ARENA.W / 2, 0, ARENA.D / 2);
   const rx = (ARENA.W / 2 + 0.8) * cam.ppm, ry = (ARENA.D / 2 + 0.6) * cam.ppm * 0.36;
   ctx.save(); ctx.translate(c.x, c.y); ctx.scale(1, ry / rx);
@@ -606,9 +680,10 @@ function drawFrontGrass() {
 function drawShadow(f) {
   const p = proj(f.x, 0, f.z);
   const lying = f.ko ? Math.min(1, f.koT / 0.5) : 0;
-  const rx = (0.38 + lying * 0.7) * cam.ppm * p.s, ry = 0.11 * cam.ppm * p.s;
+  const k = f.def.height / 1.75;
+  const rx = (0.38 + lying * 0.7) * k * cam.ppm * p.s, ry = 0.11 * k * cam.ppm * p.s;
   ctx.fillStyle = 'rgba(20,40,10,.28)';
-  ctx.beginPath(); ctx.ellipse(p.x - f.face * lying * 0.8 * cam.ppm * p.s, p.y, rx, ry, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(p.x - f.face * lying * 0.8 * k * cam.ppm * p.s, p.y, rx, ry, 0, 0, Math.PI * 2); ctx.fill();
 }
 
 function seg(a, b, w, col) {
@@ -619,8 +694,7 @@ function seg(a, b, w, col) {
 function drawHuman(f, sk) {
   const c = f.corner, k = sk.k;
   const shirt = c.color, pants = c.pants;
-  const skinB = shade(f.skin.startsWith('#') ? f.skin : '#e2b48c', 0.82);
-  const shoe = '#2a2420';
+  const skinB = shade(f.skin, 0.82);
   ctx.lineCap = 'round'; ctx.lineJoin = 'round';
   const foot = (L, col) => {
     const d = { x: Math.cos(L.a2), y: Math.sin(L.a2) };
@@ -629,47 +703,165 @@ function drawHuman(f, sk) {
   const leg = (L, dark) => {
     seg(L.o, L.j1, 0.15 * k, dark ? shade(pants, 0.75) : pants);
     seg(L.j1, L.j2, 0.125 * k, dark ? shade(pants, 0.75) : pants);
-    foot(L, dark ? '#1a1612' : shoe);
+    foot(L, dark ? '#1a1612' : '#2a2420');
   };
   const arm = (A, dark, attacking) => {
     seg(A.o, A.j1, 0.105 * k, dark ? shade(shirt, 0.72) : shirt);
     seg(A.j1, A.j2, 0.09 * k, dark ? skinB : f.skin);
-    // puño con venda
     ctx.fillStyle = attacking ? c.wrap : (dark ? skinB : f.skin);
     ctx.beginPath(); ctx.arc(A.j2.x, A.j2.y, 0.06 * k, 0, Math.PI * 2); ctx.fill();
     if (!attacking) { ctx.fillStyle = dark ? shade(c.wrap, .75) : c.wrap; ctx.beginPath(); ctx.arc(A.j2.x, A.j2.y, 0.06 * k, Math.PI * 0.6, Math.PI * 1.4); ctx.fill(); }
   };
-  const a = f.attack;
-  const punchingF = a && a.type === 'punch' && !a.hand, punchingB = a && a.type === 'punch' && a.hand;
-
+  const eff = f.attack && f.attack.variant.eff;
   leg(sk.legB, true);
-  arm(sk.armB, true, punchingB);
-  // torso
+  arm(sk.armB, true, eff === 'armB');
   seg(sk.hip, sk.sh, 0.30 * k, shirt);
-  // cinturón
   const dir = { x: sk.sh.x - sk.hip.x, y: sk.sh.y - sk.hip.y };
   seg({ x: sk.hip.x + dir.x * 0.02, y: sk.hip.y + dir.y * 0.02 }, { x: sk.hip.x + dir.x * 0.1, y: sk.hip.y + dir.y * 0.1 }, 0.31 * k, shade(pants, 0.9));
-  // número / franja en camiseta
   seg({ x: sk.hip.x + dir.x * 0.45 + 0.05 * k, y: sk.hip.y + dir.y * 0.45 }, { x: sk.hip.x + dir.x * 0.85 + 0.05 * k, y: sk.hip.y + dir.y * 0.85 }, 0.05 * k, 'rgba(255,255,255,.35)');
   leg(sk.legF, false);
-  // cuello y cabeza
   seg(sk.sh, sk.head, 0.08 * k, f.skin);
   ctx.fillStyle = f.skin; ctx.beginPath(); ctx.arc(sk.head.x, sk.head.y + 0.02 * k, 0.115 * k, 0, Math.PI * 2); ctx.fill();
   ctx.fillStyle = f.hair; ctx.beginPath(); ctx.arc(sk.head.x - 0.01 * k, sk.head.y + 0.045 * k, 0.11 * k, Math.PI * 0.05, Math.PI * 1.15); ctx.fill();
-  // ojo y oreja
   ctx.fillStyle = '#1b1410'; ctx.beginPath(); ctx.arc(sk.head.x + 0.065 * k, sk.head.y + 0.035 * k, 0.012 * k, 0, Math.PI * 2); ctx.fill();
-  ctx.fillStyle = shade('#e2b48c', 0.85); ctx.beginPath(); ctx.arc(sk.head.x - 0.02 * k, sk.head.y + 0.02 * k, 0.022 * k, 0, Math.PI * 2); ctx.fill();
-  // cinta en la frente
+  ctx.fillStyle = shade(f.skin, 0.85); ctx.beginPath(); ctx.arc(sk.head.x - 0.02 * k, sk.head.y + 0.02 * k, 0.022 * k, 0, Math.PI * 2); ctx.fill();
   ctx.strokeStyle = shirt; ctx.lineWidth = 0.025 * k;
   ctx.beginPath(); ctx.arc(sk.head.x, sk.head.y + 0.02 * k, 0.115 * k, Math.PI * 0.12, Math.PI * 0.42); ctx.stroke();
-  arm(sk.armF, false, punchingF);
+  arm(sk.armF, false, eff === 'armF');
 }
+
+/* Ares: casco corintio con penacho, coraza musculada de bronce, pteruges, grebas, clámide roja, dory y aspis */
+const BRZ = '#c9933e', BRZ_D = '#8a5a22', BRZ_L = '#f2c872', CLOAK = '#a3201b', LEATHER = '#6b4423', A_SKIN = '#c98d5e';
+function drawAres(f, sk) {
+  const k = sk.k, c = f.corner;
+  const skinB = shade(A_SKIN, 0.8);
+  ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  // clámide (capa) que ondea hacia atrás según la velocidad
+  const speed = Math.hypot(f.vx, f.vz);
+  const fl = Math.sin(SIM.time * 7 + f.x) * 0.05 + Math.min(1, speed / 20) * 0.5 + f.runBlend * 0.15;
+  ctx.fillStyle = shade(CLOAK, 0.8);
+  ctx.beginPath();
+  ctx.moveTo(sk.sh.x - 0.02 * k, sk.sh.y + 0.04 * k);
+  ctx.quadraticCurveTo(sk.sh.x - (0.3 + fl * 0.6) * k, sk.sh.y - 0.2 * k, sk.hip.x - (0.35 + fl) * k, 0.42 * k + fl * 0.4 * k);
+  ctx.lineTo(sk.hip.x - (0.1 + fl * 0.5) * k, 0.38 * k + fl * 0.2 * k);
+  ctx.quadraticCurveTo(sk.hip.x - 0.08 * k, sk.hip.y * 0.8, sk.sh.x - 0.08 * k, sk.sh.y - 0.05 * k);
+  ctx.closePath(); ctx.fill();
+
+  const leg = (L, dark) => {
+    seg(L.o, L.j1, 0.16 * k, dark ? skinB : A_SKIN);
+    seg(L.j1, L.j2, 0.14 * k, dark ? BRZ_D : BRZ);           // greba
+    if (!dark) seg({ x: L.j1.x + 0.02 * k, y: L.j1.y - 0.04 * k }, { x: lerp(L.j1.x, L.j2.x, .8) + 0.02 * k, y: lerp(L.j1.y, L.j2.y, .8) }, 0.03 * k, BRZ_L);
+    const d = { x: Math.cos(L.a2), y: Math.sin(L.a2) };
+    seg({ x: L.j2.x - d.x * 0.03 * k, y: L.j2.y - d.y * 0.03 * k }, { x: L.j2.x + d.x * 0.14 * k, y: L.j2.y + d.y * 0.14 * k }, 0.07 * k, dark ? '#3a2615' : LEATHER);
+  };
+  const arm = (A, dark) => {
+    seg(A.o, A.j1, 0.115 * k, dark ? skinB : A_SKIN);
+    seg(A.j1, A.j2, 0.1 * k, dark ? skinB : A_SKIN);
+    seg(lerp2(A.j1, A.j2, 0.45), lerp2(A.j1, A.j2, 0.85), 0.11 * k, dark ? '#4a2f18' : LEATHER); // brazal
+    ctx.fillStyle = dark ? skinB : A_SKIN; ctx.beginPath(); ctx.arc(A.j2.x, A.j2.y, 0.065 * k, 0, Math.PI * 2); ctx.fill();
+  };
+
+  leg(sk.legB, true);
+  arm(sk.armB, true);
+  // dory: asta de fresno, punta de bronce en forma de hoja y regatón
+  const S = sk.spear, d = S.dir, n = { x: -d.y, y: d.x };
+  seg(S.butt, S.tip, 0.04 * k, '#7a5230');
+  seg(S.butt, { x: S.butt.x + d.x * 0.14 * k, y: S.butt.y + d.y * 0.14 * k }, 0.045 * k, BRZ_D);
+  const b0 = { x: S.tip.x - d.x * 0.3 * k, y: S.tip.y - d.y * 0.3 * k }, bm = { x: S.tip.x - d.x * 0.16 * k, y: S.tip.y - d.y * 0.16 * k };
+  ctx.fillStyle = BRZ_L; ctx.beginPath();
+  ctx.moveTo(S.tip.x, S.tip.y);
+  ctx.quadraticCurveTo(bm.x + n.x * 0.06 * k, bm.y + n.y * 0.06 * k, b0.x, b0.y);
+  ctx.quadraticCurveTo(bm.x - n.x * 0.06 * k, bm.y - n.y * 0.06 * k, S.tip.x, S.tip.y);
+  ctx.fill();
+  seg(b0, { x: b0.x + d.x * 0.25 * k, y: b0.y + d.y * 0.25 * k }, 0.008 * k, BRZ_D);
+
+  // pteruges (faldón de tiras de cuero)
+  ctx.save(); ctx.translate(sk.hip.x, sk.hip.y + 0.05 * k); ctx.rotate(-sk.lean * 0.4);
+  for (let i = -3; i <= 3; i++) {
+    ctx.fillStyle = i % 2 ? LEATHER : shade(LEATHER, 0.8);
+    ctx.fillRect(i * 0.05 * k - 0.025 * k, -0.26 * k, 0.048 * k, 0.26 * k);
+  }
+  ctx.fillStyle = CLOAK; ctx.fillRect(-0.19 * k, -0.24 * k, 0.38 * k, 0.03 * k);
+  ctx.restore();
+
+  // coraza musculada
+  seg(sk.hip, sk.sh, 0.34 * k, BRZ);
+  const dir = { x: sk.sh.x - sk.hip.x, y: sk.sh.y - sk.hip.y };
+  const at = (u, off) => ({ x: sk.hip.x + dir.x * u + off * k * Math.cos(sk.lean), y: sk.hip.y + dir.y * u - off * k * Math.sin(sk.lean) });
+  seg(at(0.3, 0.1), at(0.95, 0.1), 0.06 * k, BRZ_L);
+  seg(at(0.4, 0.02), at(0.42, 0.13), 0.012 * k, BRZ_D);
+  seg(at(0.58, 0.02), at(0.6, 0.13), 0.012 * k, BRZ_D);
+  seg(at(0.78, 0.0), at(0.8, 0.14), 0.014 * k, BRZ_D);
+  seg(at(0.08, -0.16), at(0.08, 0.16), 0.04 * k, BRZ_D);     // borde inferior
+
+  leg(sk.legF, false);
+  // cuello y casco corintio
+  seg(sk.sh, sk.head, 0.09 * k, A_SKIN);
+  const h = { x: sk.head.x, y: sk.head.y + 0.02 * k };
+  // penacho de crin roja
+  ctx.fillStyle = '#c0221b';
+  ctx.beginPath(); ctx.ellipse(h.x - 0.04 * k, h.y + 0.2 * k, 0.21 * k, 0.07 * k, -0.15, 0, Math.PI * 2); ctx.fill();
+  ctx.strokeStyle = '#7d1310'; ctx.lineWidth = 0.008 * k;
+  for (let i = -4; i <= 4; i++) { ctx.beginPath(); ctx.moveTo(h.x - 0.04 * k + i * 0.04 * k, h.y + 0.15 * k); ctx.lineTo(h.x - 0.04 * k + i * 0.045 * k, h.y + 0.26 * k); ctx.stroke(); }
+  seg({ x: h.x - 0.02 * k, y: h.y + 0.1 * k }, { x: h.x - 0.03 * k, y: h.y + 0.15 * k }, 0.04 * k, BRZ_D);
+  // cuerpo del casco
+  ctx.fillStyle = BRZ;
+  ctx.beginPath();
+  ctx.moveTo(h.x - 0.13 * k, h.y - 0.02 * k);
+  ctx.quadraticCurveTo(h.x - 0.14 * k, h.y + 0.14 * k, h.x + 0.01 * k, h.y + 0.14 * k);
+  ctx.quadraticCurveTo(h.x + 0.14 * k, h.y + 0.13 * k, h.x + 0.14 * k, h.y);
+  ctx.lineTo(h.x + 0.12 * k, h.y - 0.12 * k);
+  ctx.lineTo(h.x + 0.03 * k, h.y - 0.15 * k);
+  ctx.lineTo(h.x - 0.1 * k, h.y - 0.1 * k);
+  ctx.quadraticCurveTo(h.x - 0.17 * k, h.y - 0.08 * k, h.x - 0.13 * k, h.y - 0.02 * k);
+  ctx.fill();
+  ctx.fillStyle = BRZ_L; ctx.beginPath(); ctx.ellipse(h.x - 0.02 * k, h.y + 0.09 * k, 0.07 * k, 0.03 * k, -0.2, 0, Math.PI * 2); ctx.fill();
+  // abertura en T: ojos y boca
+  ctx.fillStyle = '#1a0f08';
+  ctx.beginPath(); ctx.moveTo(h.x + 0.02 * k, h.y + 0.035 * k); ctx.lineTo(h.x + 0.145 * k, h.y + 0.03 * k); ctx.lineTo(h.x + 0.145 * k, h.y + 0.005 * k); ctx.lineTo(h.x + 0.03 * k, h.y + 0.01 * k); ctx.fill();
+  ctx.fillRect(h.x + 0.1 * k, h.y - 0.14 * k, 0.045 * k, 0.15 * k);
+  // ojo encendido
+  ctx.fillStyle = f.attack ? '#ffb020' : '#e0e0d0';
+  ctx.beginPath(); ctx.arc(h.x + 0.09 * k, h.y + 0.022 * k, 0.012 * k, 0, Math.PI * 2); ctx.fill();
+  // guardanariz
+  seg({ x: h.x + 0.13 * k, y: h.y + 0.03 * k }, { x: h.x + 0.135 * k, y: h.y - 0.05 * k }, 0.022 * k, BRZ);
+
+  arm(sk.armF, false);
+  // aspis: escudo redondo de bronce visto a tres cuartos, con el color de la esquina
+  const sh = sk.shield, R = 0.46 * k;
+  ctx.save(); ctx.translate(sh.x, sh.y); ctx.rotate(-sk.lean * 0.3);
+  ctx.fillStyle = BRZ_D; ctx.beginPath(); ctx.ellipse(-0.02 * k, 0, R * 0.34, R, 0, 0, Math.PI * 2); ctx.fill();
+  const sg = ctx.createLinearGradient(0, -R, 0, R);
+  sg.addColorStop(0, BRZ_L); sg.addColorStop(0.5, BRZ); sg.addColorStop(1, BRZ_D);
+  ctx.fillStyle = sg; ctx.beginPath(); ctx.ellipse(0.02 * k, 0, R * 0.3, R * 0.94, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.strokeStyle = c.color; ctx.lineWidth = 0.035 * k;
+  ctx.beginPath(); ctx.ellipse(0.025 * k, 0, R * 0.21, R * 0.66, 0, 0, Math.PI * 2); ctx.stroke();
+  // emblema: jabalí, animal sagrado de Ares (colmillo estilizado)
+  ctx.fillStyle = '#5a1510';
+  ctx.beginPath(); ctx.ellipse(0.03 * k, 0, R * 0.1, R * 0.32, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.strokeStyle = '#f3e7c8'; ctx.lineWidth = 0.018 * k;
+  ctx.beginPath(); ctx.arc(0.035 * k, -0.04 * k, 0.06 * k, Math.PI * 0.2, Math.PI * 0.9); ctx.stroke();
+  ctx.restore();
+}
+const lerp2 = (a, b, t) => ({ x: lerp(a.x, b.x, t), y: lerp(a.y, b.y, t) });
 
 function drawFighter(f) {
   const p = proj(f.x, 0, f.z);
   const k = cam.ppm * p.s;
-  const pose = currentPose(f);
-  const sk = skeleton(pose, f.def.height);
+  const sk = skeleton(currentPose(f), f.def.height);
+  // imágenes residuales de la embestida
+  for (const g of f.ghosts) {
+    const gp = proj(g.x, 0, g.z), al = 1 - (SIM.time - g.t) / 0.14;
+    ctx.save(); ctx.globalAlpha = 0.35 * al; ctx.translate(gp.x, gp.y); ctx.scale(g.face * cam.ppm * gp.s, -cam.ppm * gp.s);
+    f.def.draw(f, skeleton(g.pose, f.def.height)); ctx.restore();
+  }
+  // furia de Ares al atacar
+  if (f.def.warCry && f.attack && !f.ko) {
+    const c = proj(f.x, f.def.height * 0.55, f.z), r = f.def.height * 0.8 * k;
+    const gr = ctx.createRadialGradient(c.x, c.y, 0, c.x, c.y, r);
+    gr.addColorStop(0, 'rgba(255,90,30,.35)'); gr.addColorStop(1, 'rgba(255,60,20,0)');
+    ctx.fillStyle = gr; ctx.beginPath(); ctx.arc(c.x, c.y, r, 0, Math.PI * 2); ctx.fill();
+  }
   ctx.save();
   ctx.translate(p.x, p.y);
   if (f.ko) {
@@ -680,10 +872,9 @@ function drawFighter(f) {
     ctx.rotate(-f.face * ang);
   }
   ctx.scale(f.face * k, -k);
-  f.def.draw(f, f.ko ? skeleton(P.hit, f.def.height) : sk);
+  f.def.draw(f, sk);
   ctx.restore();
   if (f.flash > 0) {
-    // destello blanco sobre el cuerpo
     ctx.save(); ctx.globalAlpha = f.flash / 0.12 * 0.55; ctx.translate(p.x, p.y); ctx.scale(f.face * k, -k);
     ctx.fillStyle = '#fff';
     ctx.beginPath(); ctx.ellipse(sk.sh.x * 0.5, (sk.hip.y + sk.sh.y) / 2, 0.22 * sk.k, 0.45 * sk.k, 0, 0, Math.PI * 2); ctx.fill();
@@ -692,29 +883,30 @@ function drawFighter(f) {
   // estela del ataque
   const a = f.attack;
   if (a && !f.ko) {
-    const e = a.type === 'kick' ? sk.legF.j2 : (a.hand ? sk.armB.j2 : sk.armF.j2);
+    const e = effectorOf(sk, a.variant.eff);
     const sp = { x: p.x + e.x * f.face * k, y: p.y - e.y * k };
-    if (a.t > a.def.windup * 0.6 && a.t < a.def.windup + a.def.active + a.def.recover * 0.4) f.trail.push({ ...sp, t: SIM.time });
+    const ts = a.t - a.windup;
+    if (ts > -a.windup * 0.4 && ts < a.strike + a.recover * 0.4) f.trail.push({ ...sp, t: SIM.time });
   }
-  f.trail = f.trail.filter(q => SIM.time - q.t < 0.12);
+  f.trail = f.trail.filter(q => SIM.time - q.t < 0.12 && q.t <= SIM.time);
   if (f.trail.length > 1) {
     ctx.save(); ctx.lineCap = 'round';
+    const col = f.def.warCry ? '255,200,120' : '255,255,255';
     for (let i = 1; i < f.trail.length; i++) {
       const q0 = f.trail[i - 1], q1 = f.trail[i];
       const al = 1 - (SIM.time - q1.t) / 0.12;
-      ctx.strokeStyle = `rgba(255,255,255,${0.75 * al})`;
-      ctx.lineWidth = (a && a.type === 'kick' ? 0.14 : 0.1) * k * al;
+      ctx.strokeStyle = `rgba(${col},${0.75 * al})`;
+      ctx.lineWidth = (a && a.variant.eff === 'legF' ? 0.14 : 0.1) * k * al;
       ctx.beginPath(); ctx.moveTo(q0.x, q0.y); ctx.lineTo(q1.x, q1.y); ctx.stroke();
     }
     ctx.restore();
   }
-  // etiqueta
   if (!f.ko) {
-    const top = proj(f.x, f.def.height + 0.28, f.z);
+    const top = proj(f.x, f.def.height + 0.38, f.z);
     ctx.font = `700 ${Math.max(10, k * 0.17)}px "Bricolage Grotesque", system-ui, sans-serif`;
     ctx.textAlign = 'center';
-    const label = f.corner.name.toUpperCase();
-    const w = ctx.measureText(label).width + 10, h = Math.max(14, k * 0.24);
+    const label = `${f.corner.name.toUpperCase()} · ${f.def.name.toUpperCase()}`;
+    const w = ctx.measureText(label).width + 12, h = Math.max(14, k * 0.24);
     ctx.fillStyle = f.corner.color;
     ctx.beginPath(); ctx.roundRect(top.x - w / 2, top.y - h / 2, w, h, h / 2); ctx.fill();
     ctx.fillStyle = '#fff'; ctx.textBaseline = 'middle'; ctx.fillText(label, top.x, top.y + 0.5);
@@ -722,37 +914,38 @@ function drawFighter(f) {
 }
 
 function drawEffect(e) {
-  const p = proj(e.x, e.y, e.z), k = cam.ppm * p.s, t = e.t / e.life;
   if (e.t < 0) return;
+  if (e.f) { e.x = e.f.x; e.z = e.f.z; e.y = e.f.def.height; }
+  const p = proj(e.x, e.y, e.z), k = cam.ppm * p.s, t = e.t / e.life;
   if (e.kind === 'spark') {
-    // anillo
     ctx.strokeStyle = `rgba(255,255,255,${1 - t})`; ctx.lineWidth = Math.max(1.5, 0.04 * k * (1 - t));
-    ctx.beginPath(); ctx.arc(p.x, p.y, (0.08 + t * (e.big ? 0.45 : 0.32)) * k, 0, Math.PI * 2); ctx.stroke();
-    // estrella de impacto
+    ctx.beginPath(); ctx.arc(p.x, p.y, (0.08 + t * (e.big ? 0.5 : 0.32)) * k, 0, Math.PI * 2); ctx.stroke();
     if (t < 0.45) {
-      const r = (e.big ? 0.3 : 0.22) * k * (1 - t * 0.8);
+      const r = (e.big ? 0.32 : 0.22) * k * (1 - t * 0.8);
       ctx.fillStyle = `rgba(255,236,150,${1 - t * 2})`;
       ctx.beginPath();
-      for (let i = 0; i < 16; i++) {
-        const a = i / 16 * Math.PI * 2, rr = i % 2 ? r * 0.38 : r;
-        ctx.lineTo(p.x + Math.cos(a) * rr, p.y + Math.sin(a) * rr);
-      }
+      for (let i = 0; i < 16; i++) { const a = i / 16 * Math.PI * 2, rr = i % 2 ? r * 0.38 : r; ctx.lineTo(p.x + Math.cos(a) * rr, p.y + Math.sin(a) * rr); }
       ctx.closePath(); ctx.fill();
       ctx.fillStyle = `rgba(255,255,255,${1 - t * 2})`;
       ctx.beginPath(); ctx.arc(p.x, p.y, r * 0.3, 0, Math.PI * 2); ctx.fill();
     }
-    // chispas
     ctx.fillStyle = `rgba(255,214,90,${1 - t})`;
     for (const q of e.parts) {
       const d = q.v * e.t * k * 0.25 * (1 - t * 0.4);
       ctx.beginPath(); ctx.arc(p.x + Math.cos(q.a) * d + e.face * d * 0.5, p.y + Math.sin(q.a) * d, q.r * k * (1 - t), 0, Math.PI * 2); ctx.fill();
     }
+  } else if (e.kind === 'clink') {
+    ctx.strokeStyle = `rgba(255,255,255,${1 - t})`; ctx.lineWidth = Math.max(1, 0.015 * k);
+    for (let i = 0; i < 4; i++) {
+      const a = i * Math.PI / 4, r = (0.03 + t * 0.1) * k;
+      ctx.beginPath(); ctx.moveTo(p.x - Math.cos(a) * r, p.y - Math.sin(a) * r); ctx.lineTo(p.x + Math.cos(a) * r, p.y + Math.sin(a) * r); ctx.stroke();
+    }
   } else if (e.kind === 'num') {
     const y = p.y - t * 0.6 * k;
-    ctx.font = `800 ${Math.max(14, k * 0.3)}px "Bricolage Grotesque", system-ui, sans-serif`;
+    ctx.font = `800 ${Math.max(e.small ? 11 : 14, k * (e.small ? 0.16 : 0.3))}px "Bricolage Grotesque", system-ui, sans-serif`;
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.globalAlpha = 1 - Math.max(0, (t - 0.6) / 0.4);
-    ctx.lineWidth = Math.max(3, k * 0.05); ctx.strokeStyle = 'rgba(0,0,0,.55)';
+    ctx.lineWidth = Math.max(3, k * 0.04); ctx.strokeStyle = 'rgba(0,0,0,.55)';
     const sc = 1 + Math.max(0, 0.4 - t * 2);
     ctx.save(); ctx.translate(p.x, y); ctx.scale(sc, sc);
     ctx.strokeText(e.text, 0, 0); ctx.fillStyle = '#fff'; ctx.fillText(e.text, 0, 0);
@@ -763,6 +956,21 @@ function drawEffect(e) {
       ctx.fillStyle = `rgba(196,176,120,${0.45 * (1 - t)})`;
       ctx.beginPath(); ctx.ellipse(p.x + Math.cos(i * 0.9) * d, p.y - Math.abs(Math.sin(i * 1.7)) * 0.15 * k * (1 + t), 0.18 * k * (1 + t), 0.09 * k * (1 + t), 0, 0, Math.PI * 2); ctx.fill();
     }
+  } else if (e.kind === 'cry') {
+    // grito de guerra: ondas de sonido rojas y doradas
+    for (let i = 0; i < 3; i++) {
+      const tt = t - i * 0.15; if (tt < 0) continue;
+      ctx.strokeStyle = i % 2 ? `rgba(255,200,90,${0.7 * (1 - tt)})` : `rgba(200,30,20,${0.7 * (1 - tt)})`;
+      ctx.lineWidth = Math.max(2, 0.06 * k * (1 - tt));
+      ctx.beginPath(); ctx.ellipse(p.x, p.y, (0.3 + tt * 3.5) * k, (0.2 + tt * 1.6) * k, 0, 0, Math.PI * 2); ctx.stroke();
+    }
+    ctx.globalAlpha = 1 - Math.max(0, (t - 0.6) / 0.4);
+    ctx.font = `800 ${Math.max(14, k * 0.3)}px "Bricolage Grotesque", system-ui, sans-serif`;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.lineWidth = 4; ctx.strokeStyle = 'rgba(60,0,0,.6)';
+    ctx.strokeText('¡ΑΛΑΛΑΙ!', p.x, p.y - (0.75 + t * 0.3) * k);
+    ctx.fillStyle = '#ffd36a'; ctx.fillText('¡ΑΛΑΛΑΙ!', p.x, p.y - (0.75 + t * 0.3) * k);
+    ctx.globalAlpha = 1;
   }
 }
 
@@ -773,10 +981,9 @@ function render(rdt) {
   drawBackground();
   drawTufts();
   for (const f of fighters) drawShadow(f);
-  const items = [...fighters.map(f => ({ z: f.z, f })), ...effects.map(e => ({ z: e.z, e }))].sort((a, b) => a.z - b.z);
+  const items = [...fighters.map(f => ({ z: f.z, f })), ...effects.map(e => ({ z: e.f ? e.f.z + 0.01 : e.z, e }))].sort((a, b) => a.z - b.z);
   for (const it of items) it.f ? drawFighter(it.f) : drawEffect(it.e);
   drawFrontGrass();
-  // viñeta suave
   const v = ctx.createRadialGradient(CW / 2, CH * 0.55, CH * 0.4, CW / 2, CH * 0.55, CW * 0.75);
   v.addColorStop(0, 'rgba(0,0,0,0)'); v.addColorStop(1, 'rgba(10,30,0,.18)');
   ctx.fillStyle = v; ctx.fillRect(-10, -10, CW + 20, CH + 20);
@@ -784,6 +991,7 @@ function render(rdt) {
 
 /* ---------- HUD ---------- */
 const barEls = [document.getElementById('barA'), document.getElementById('barB')];
+let hudTick = 0;
 function updateHUD(force) {
   fighters.forEach((f, i) => {
     const el = barEls[i]; if (!el) return;
@@ -793,12 +1001,11 @@ function updateHUD(force) {
     fill.style.width = pct + '%';
     fill.style.background = pct > 50 ? 'var(--hp)' : pct > 25 ? 'var(--hp-low)' : 'var(--hp-crit)';
     el.querySelector('.ghost').style.width = pct + '%';
-    el.querySelector('.hpnum').textContent = `${f.hp} / ${f.def.hp} HP`;
+    el.querySelector('.hpnum').textContent = `${fmt(f.hp)} / ${fmt(f.def.hp)} de vida`;
   });
   document.getElementById('clock').textContent = SIM.time.toFixed(1) + ' s';
   if (force || hudTick++ % 6 === 0) renderCornerStats();
 }
-let hudTick = 0;
 
 /* ---------- controles ---------- */
 const PRESETS = [0.1, 0.25, 0.5, 1, 2];
@@ -825,7 +1032,7 @@ function setPaused(p) {
   document.getElementById('pausedTag').hidden = !p;
 }
 document.getElementById('pauseBtn').onclick = () => setPaused(!SIM.paused);
-document.getElementById('stepBtn').onclick = () => { setPaused(true); for (let i = 0; i < 2; i++) update(FIXED); updateHUD(); };
+document.getElementById('stepBtn').onclick = () => { setPaused(true); for (let i = 0; i < 4; i++) update(FIXED); updateHUD(); };
 document.getElementById('restartBtn').onclick = () => { resetMatch(); setPaused(false); };
 window.addEventListener('keydown', e => {
   if (e.target.closest('input,select,textarea')) return;
@@ -837,7 +1044,7 @@ window.addEventListener('keydown', e => {
 function renderCorners() {
   const box = document.getElementById('corners');
   box.innerHTML = '';
-  CORNERS.forEach((c, i) => {
+  CORNERS.forEach(c => {
     const d = document.createElement('div');
     d.className = 'corner'; d.style.setProperty('--c', c.color);
     const opts = Object.entries(SPECIES).map(([k, s]) => `<option value="${k}" ${selection[c.key] === k ? 'selected' : ''}>${s.name}</option>`).join('');
@@ -853,13 +1060,14 @@ function renderCornerStats() {
   CORNERS.forEach((c, i) => {
     const dl = document.getElementById('stats' + c.key); if (!dl) return;
     const f = fighters[i], def = SPECIES[selection[c.key]];
+    const atk = Object.values(def.attacks).map(A =>
+      `<dt>${A.name}</dt><dd>${fmt(A.damage)} · ${fmtTime(A.strikeDist / def.attackSpeed)}</dd>`).join('');
     dl.innerHTML = `
-      <dt>Vida</dt><dd>${f ? f.hp : def.hp} / ${def.hp}</dd>
-      <dt>Velocidad</dt><dd>${def.speed} m/s</dd>
-      <dt>En pantalla</dt><dd>${(def.speed * SIM.timeScale).toFixed(2)} m/s</dd>
-      <dt>${def.attacks.punch.name}</dt><dd>${def.attacks.punch.damage} daño</dd>
-      <dt>${def.attacks.kick.name}</dt><dd>${def.attacks.kick.damage} daño</dd>
-      <dt>Impactos</dt><dd>${f ? f.hits : 0} · ${f ? f.dealt : 0} daño</dd>`;
+      <dt>Vida</dt><dd>${fmt(f ? f.hp : def.hp)}</dd>
+      <dt>Caminata</dt><dd>${def.speed} m/s</dd>
+      <dt>Ataque</dt><dd>${def.attackSpeed} m/s</dd>
+      ${atk}
+      <dt>Impactos</dt><dd>${f ? f.hits : 0}</dd>`;
   });
 }
 
@@ -870,7 +1078,7 @@ function frame(now) {
   if (!SIM.paused) {
     acc += rdt * SIM.timeScale;
     let n = 0;
-    while (acc >= FIXED && n < 400) { update(FIXED); acc -= FIXED; n++; }
+    while (acc >= FIXED && n < 800) { update(FIXED); acc -= FIXED; n++; }
     if (SIM.over && SIM.overT > 3.5 && document.getElementById('autoRematch').checked) resetMatch();
     updateHUD();
   }
