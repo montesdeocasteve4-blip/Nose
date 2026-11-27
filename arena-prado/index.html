@@ -226,18 +226,19 @@ const SPECIES = {
   /* Ares, dios griego de la guerra: hoplita de bronce con casco corintio, dory y aspis. */
   ares: {
     name: 'Ares', height: 2.10, radius: 0.36, stride: 2.5,
-    hp: 1, speed: 7, chase: 12, attackSpeed: 20, warCry: true,   // chase = velocidad al perseguir (m/s)
+    // Vida: unos 42 MJ. Como dios, se recupera despacio si no lo golpean durante 5 s (regen, Mt/s).
+    hp: 0.00000001, regen: 0.0000000001, speed: 7, chase: 12, attackSpeed: 20, warCry: true,   // chase = velocidad al perseguir (m/s)
     attacks: {
-      dory: { name: 'Lanzazo', damage: 1.6, reach: 2.3, windupDist: 0.6, strikeDist: 1.6, recoverDist: 1.2, lunge: 0.4,
+      dory: { name: 'Lanzazo', damage: 0.0000000002, reach: 2.3, windupDist: 0.6, strikeDist: 1.6, recoverDist: 1.2, lunge: 0.4,
         knock: 8, stun: 0.3, min: 1.0, max: 2.4, weight: 0.7, anim: 'spear' },
-      aspis: { name: 'Golpe de escudo', damage: 1.6, reach: 1.0, windupDist: 0.4, strikeDist: 0.9, recoverDist: 0.8, lunge: 0.5,
+      aspis: { name: 'Golpe de escudo', damage: 0.00000000005, reach: 1.0, windupDist: 0.4, strikeDist: 0.9, recoverDist: 0.8, lunge: 0.5,
         knock: 10, stun: 0.35, min: 0, max: 1.1, weight: 1, anim: 'shield' },
-      charge: { name: 'Embestida', damage: 1.6, reach: 2.3, windupDist: 0.5, strikeDist: 1.6, recoverDist: 1.4, dash: true,
+      charge: { name: 'Embestida', damage: 0.0000000002, reach: 2.3, windupDist: 0.5, strikeDist: 1.6, recoverDist: 1.4, dash: true,
         knock: 12, stun: 0.4, min: 3, max: 30, weight: 1, anim: 'spear' },
     },
     ai: { keep: 1.8, tooClose: 0.4, cooldown: [0.05, 0.25] },
     // contra el aire: arroja su dory. Mucho menos eficaz: poca puntería contra blancos rápidos y menos daño
-    throwAt: { name: 'Lanzamiento de dory', damage: 0.16, range: 1500, speed: 600, accuracy: 0.15,
+    throwAt: { name: 'Lanzamiento de dory', damage: 0.00000000002, range: 1500, speed: 600, accuracy: 0.15,
       windupDist: 0.8, strikeDist: 1.4, recoverDist: 1.0, cooldown: [3, 5], anim: 'spear', targets: ['air'] },
     draw: drawAres,
   },
@@ -412,6 +413,8 @@ function update(dt) {
   SIM.time += dt;
   for (const f of fighters) {
     f.flash = Math.max(0, f.flash - dt);
+    if (f.def.regen && !f.ko && f.hp > 0 && f.hp < f.def.hp && SIM.time - (f.lastHit ?? -99) > 5)
+      f.hp = Math.min(f.def.hp, f.hp + f.def.regen * dt);
     if (f.def.domain === 'air') { updateAir(f, dt); continue; }
     if (f.def.think) { if (f.ko) f.koT += dt; else if (!f.retired) f.def.think(f, dt); continue; }
     f.recoil = Math.max(0, f.recoil - dt * 8);
@@ -642,7 +645,7 @@ function tryMelee(f, a) {
 
 function applyHit(f, o, A, pt, kind) {
   if (!active(o)) return;
-  o.hp -= A.damage;
+  o.hp -= A.damage; o.lastHit = SIM.time;
   if (o.hp <= o.def.hp * 1e-9) o.hp = 0;
   f.hits++;
   // aguante: un impacto insignificante frente a su vida no lo hace retroceder
